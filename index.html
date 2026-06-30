@@ -26,7 +26,7 @@ h1{font-size:24px;padding:16px 0 2px;text-align:center;background:linear-gradien
 #reader__dashboard_section{display:none}
 .field{width:100%;padding:12px;border:2px solid #e5e5ea;border-radius:12px;font-size:15px;outline:none;margin:4px 0;background:#f9f9f9}
 .field:focus{border-color:#4361ee}
-.preview{background:#f2f2f7;border-radius:12px;padding:10px;margin:4px 0;font-size:12px;line-height:1.5}
+.preview{background:#f2f2f7;border-radius:12px;padding:10px;margin:4px 0;font-size:12px;line-height:1.5;max-height:250px;overflow-y:auto}
 .preview strong{color:#4361ee}
 .hidden{display:none!important}
 .toast{position:fixed;bottom:30px;left:50%;transform:translateX(-50%);background:#1c1c1e;color:#fff;padding:12px 24px;border-radius:12px;font-size:14px;z-index:999;opacity:0;transition:.25s;pointer-events:none}
@@ -51,20 +51,103 @@ h1{font-size:24px;padding:16px 0 2px;text-align:center;background:linear-gradien
   <div class="preview" id="preview"></div>
   <label style="font-size:13px;color:#8e8e93;margin:6px 0 3px">Наименование товара</label>
   <input class="field" id="fieldProduct" placeholder="Например: Молоко..." autocomplete="off">
-  <button class="btn btn-success" id="btnSend">Отправить</button>
+  <button class="btn btn-success" id="btnSend">Отправить в Telegram</button>
   <button class="btn btn-gray" id="btnSkip">Без названия</button>
 </div>
 
 <div class="toast" id="toast"></div>
 
 <script>
-var entries=JSON.parse(localStorage.getItem('q')||'[]');
-var qr=null,scanning=false,lastData=null,lastRaw='',tt=null;
+var TG='https://api.telegram.org/bot8816604840:AAGhrlFMgrz71sNgKxhgPnJvdmu0gbjtYEw';
+var CHAT='8881681054';
+var qr=null,scanning=false,lastData=null,lastFull=null,tt=null;
 
 function $(i){return document.getElementById(i)}
 function tm(m,e){clearTimeout(tt);var t=$('toast');t.textContent=m;t.style.background=e?'#ff3b30':'#1c1c1e';t.classList.add('show');tt=setTimeout(function(){t.classList.remove('show')},2500)}
 
-function pr(t){var d={};try{var p=t.startsWith('http')?new URL(t).searchParams:new URLSearchParams(t);for(var k of p.keys()){d[k]=p.get(k)}}catch(e){}return d}
+function parseQR(t){var d={};try{var p=t.startsWith('http')?new URL(t).searchParams:new URLSearchParams(t);for(var k of p.keys())d[k]=p.get(k)}catch(e){}return d}
+
+async function fetchWithProxy(url,hdrs,timeout){
+  var ac=new AbortController();var to=setTimeout(function(){ac.abort()},timeout||5000);
+  try{
+    var r=await fetch(url,{headers:hdrs,signal:ac.signal});
+    clearTimeout(to);if(r.ok)return await r.text()
+  }catch(e){}clearTimeout(to);return null
+}
+
+async function getFullReceipt(qrData){
+  var fn=qrData.fn||'',fd=qrData.i||'',fp=qrData.fp||'';
+  if(!fn||!fd||!fp)return null;
+  var hdrs={'Device-ID':crypto.randomUUID(),'Device-OS':'iOS','Version':'2.0','Accept':'application/json'};
+  
+  // Пробуем напрямую + прокси параллельно
+  var results=await Promise.allSettled([
+    fetchWithProxy('https://proverkacheka.nalog.ru/v2/check/'+fn+'/'+fd+'/'+fp,hdrs,6000),
+    fetchWithProxy('https://proverkacheka.nalog.ru/check/'+fn+'/'+fd+'/'+fp,hdrs,6000),
+    fetchWithProxy('https://api.allorigins.win/raw?url='+encodeURIComponent('https://proverkacheka.nalog.ru/v2/check/'+fn+'/'+fd+'/'+fp),hdrs,6000),
+    fetchWithProxy('https://corsproxy.io/?'+encodeURIComponent('https://proverkacheka.nalog.ru/v2/check/'+fn+'/'+fd+'/'+fp),hdrs,6000),
+    fetchWithProxy('https://receipt.tax/api/v1/check?fn='+fn+'&fd='+fd+'&fp='+fp,{},6000)
+  ]);
+  
+  for(var i=0;i<results.length;i++){
+    if(results[i].status=='fulfilled'&&results[i].value){
+      try{return JSON.parse(results[i].value)}catch(e){
+        var m=results[i].value.match(/{[^]+?totalSum[^]+?}/);
+        if(m)try{return JSON.parse(m[0])}catch(e2){}
+      }
+    }
+  }
+  return null
+}
+
+function formatFull(r,product){
+  if(!r)return null;
+  if(r.document&&r.document.receipt)r=r.document.receipt;
+  if(r.receipt)r=r.receipt;
+  if(!r.totalSum&&!r.items)return null;
+  
+  var s='';
+  s+='📄 ЧЕК\n═══════════════════════════════\n';
+  if(product)s+='📦 '+product+'\n';
+  if(r.user)s+='🏪 '+r.user+'\n';
+  if(r.userInn)s+='🔢 ИНН: '+r.userInn+'\n';
+  if(r.dateTime)s+='📅 '+(typeof r.dateTime=='string'?r.dateTime.replace('T',' ').slice(0,16):r.dateTime)+'\n';
+  if(r.operator)s+='👤 Кассир: '+r.operator+'\n';
+  if(r.kktRegId)s+='🖨 ККТ: '+r.kktRegId+'\n';
+  
+  if(r.taxationType)s+='🏷 Налог: '+r.taxationType+'\n';
+  if(r.nds0||r.nds10||r.nds18||r.ndsCalculated10||r.ndsCalculated18){
+    s+='📊 НДС: ';
+    if(r.nds0)s+='0%='+kop(r.nds0)+' ';
+    if(r.nds10)s+='10%='+kop(r.nds10)+' ';
+    if(r.nds18)s+='18%='+kop(r.nds18)+' ';
+    if(r.ndsCalculated10)s+='р10%='+kop(r.ndsCalculated10)+' ';
+    if(r.ndsCalculated18)s+='р18%='+kop(r.ndsCalculated18)+' ';
+    s+='\n'
+  }
+  
+  s+='═══════════════════════════════\n  ТОВАРЫ:\n';
+  if(r.items&&r.items.length){
+    r.items.forEach(function(item,i){
+      var name=item.name||'—';
+      var price=item.price?kop(item.price):'—';
+      var qty=item.quantity||1;
+      var sum=item.sum?kop(item.sum):'—';
+      s+='  '+(i+1)+'. '+name+'\n     '+price+' x '+qty+' = '+sum+'\n'
+    })
+  }
+  s+='═══════════════════════════════\n';
+  s+='💰 ИТОГО: '+kop(r.totalSum)+'\n';
+  if(r.cashTotalSum)s+='💵 Наличные: '+kop(r.cashTotalSum)+'\n';
+  if(r.ecashTotalSum)s+='💳 Безналичные: '+kop(r.ecashTotalSum)+'\n';
+  if(r.prepaidSum)s+='💰 Предоплата: '+kop(r.prepaidSum)+'\n';
+  if(r.postpaidSum)s+='💰 Постоплата: '+kop(r.postpaidSum)+'\n';
+  if(r.fiscalDriveNumber)s+='🔢 ФН: '+r.fiscalDriveNumber+'\n';
+  if(r.fiscalDocumentNumber)s+='📄 ФД: '+r.fiscalDocumentNumber+'\n';
+  if(r.fiscalSign)s+='✅ ФП: '+r.fiscalSign+'\n';
+  return s
+}
+function kop(v){return (v/100).toFixed(2)}
 
 async function sc(){
   if(scanning)return;
@@ -78,29 +161,61 @@ async function sc(){
   }catch(e){$('scanStatus').textContent='Ошибка: '+e.message;setTimeout(function(){$('scannerWrap').classList.remove('active')},2000)}
 }
 function sp(){if(qr){try{qr.stop();qr.clear()}catch(e){}qr=null}scanning=false;$('scannerWrap').classList.remove('active')}
-function sr(r){lastRaw=r;lastData=pr(r);var h='';for(var k in lastData){var lb=k;if(k=='t')lb='Дата';else if(k=='s')lb='Сумма';else if(k=='fn')lb='ФН';else if(k=='i')lb='ФД';else if(k=='fp')lb='ФП';h+='<strong>'+lb+':</strong> '+lastData[k]+'<br>'};$('preview').innerHTML=h;$('fieldProduct').value='';$('resultCard').classList.remove('hidden');setTimeout(function(){$('fieldProduct').focus()},300)}
+
+async function sr(raw){
+  lastData=parseQR(raw);lastFull=null;
+  var h='<strong>QR данные:</strong><br>';
+  for(var k in lastData){
+    var lb=k;if(k=='t')lb='Дата';else if(k=='s')lb='Сумма';else if(k=='fn')lb='ФН';else if(k=='i')lb='ФД';else if(k=='fp')lb='ФП';
+    h+='<strong>'+lb+':</strong> '+lastData[k]+'<br>'
+  }
+  h+='<br><em>Запрос полных данных...</em>';
+  $('preview').innerHTML=h;$('resultCard').classList.remove('hidden');
+  
+  lastFull=await getFullReceipt(lastData);
+  if(lastFull){
+    var f=formatFull(lastFull,'');
+    if(f){
+      var lines=f.split('\n').slice(0,8).join('<br>');
+      $('preview').innerHTML=h+'<br><strong>Полные данные получены!</strong><br>'+lines+'<br>...'
+    }
+  } else {
+    $('preview').innerHTML=h+'<br><em>API nalog.ru не отвечает. Откроется чек на сайте.</em>'
+  }
+  $('fieldProduct').value='';setTimeout(function(){$('fieldProduct').focus()},300)
+}
 
 async function doSend(product){
   if(!lastData)return;
-  var btn=$('btnSend');btn.disabled=true;btn.innerHTML='Отправка...';
-  
-  // Сохраняем локально
-  entries.push({date:lastData.t||'',sum:lastData.s||'',product:product||'',num:lastData.i||''});
-  localStorage.setItem('q',JSON.stringify(entries));
+  var msg='';
+  if(lastFull)msg=formatFull(lastFull,product);
+  if(!msg){
+    msg='📄 ЧЕК\n';
+    if(product)msg+='📦 '+product+'\n';
+    for(var k in lastData){
+      var lb=k;if(k=='t')lb='📅';else if(k=='s')lb='💰';else if(k=='fn')lb='🔢';else if(k=='i')lb='📄';else if(k=='fp')lb='✅';
+      msg+=lb+': '+lastData[k]+'\n'
+    }
+  }
   
   try{
-    var r=await fetch('/send',{
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({qr:lastData,product:product,entries:entries})
+    var r=await fetch(TG+'/sendMessage',{
+      method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},
+      body:'chat_id='+CHAT+'&text='+encodeURIComponent(msg)
     });
-    if(r.ok){tm('Готово! Данные в Telegram и Excel на ПК');$('resultCard').classList.add('hidden');lastData=null}
-    else{
-      var t=await r.text();
-      tm('Ошибка: '+t,1)
-    }
-  }catch(e){tm('Нет соединения с ПК. Запустите qr-excel.exe на ПК',1)}
-  btn.disabled=false;btn.innerHTML='Отправить'
+    var j=await r.json();
+    if(!j.ok){tm('Ошибка: '+j.description,1);return}
+    
+    // .txt файл
+    try{
+      var fd=new FormData();fd.append('chat_id',CHAT);
+      fd.append('document',new Blob([msg],{type:'text/plain;charset=utf-8'}),'chek.txt');
+      await fetch(TG+'/sendDocument',{method:'POST',body:fd,mode:'no-cors'})
+    }catch(e){}
+    
+    tm('Отправлено!');
+    $('resultCard').classList.add('hidden');lastData=null;lastFull=null
+  }catch(e){tm('Нет интернета',1)}
 }
 
 $('btnSend').onclick=function(){doSend($('fieldProduct').value.trim())};
