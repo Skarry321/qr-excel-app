@@ -19,37 +19,26 @@ h1{font-size:24px;padding:16px 0 2px;text-align:center;background:linear-gradien
 .btn:active{opacity:.6}
 .btn-primary{background:#4361ee}
 .btn-success{background:#34c759}
-.btn-danger{background:#ff3b30}
 .btn-gray{background:#f2f2f7;color:#1c1c1e}
 .scanner-wrap{position:relative;width:100%;aspect-ratio:1/1;max-height:360px;overflow:hidden;border-radius:14px;background:#000;display:none}
 .scanner-wrap.active{display:block}
 #reader video{border-radius:14px;width:100%!important;height:auto!important}
-#reader{width:100%!important;min-height:auto!important}
+#reader{width:100%!important}
 #reader__scan_region{min-height:auto!important}
 #reader__dashboard_section{display:none}
 .field{width:100%;padding:12px;border:2px solid #e5e5ea;border-radius:12px;font-size:15px;outline:none;margin:4px 0;background:#f9f9f9}
 .field:focus{border-color:#4361ee}
 .preview{background:#f2f2f7;border-radius:12px;padding:10px;margin:4px 0;font-size:13px;line-height:1.7}
 .preview strong{color:#4361ee}
-table{width:100%;border-collapse:collapse;font-size:12px}
-th,td{padding:8px 6px;text-align:left;border-bottom:1px solid #f2f2f7}
-th{font-size:10px;color:#8e8e93;background:#fafafa}
-.table-wrap{max-height:240px;overflow-y:auto;border-radius:12px;border:1px solid #f2f2f7}
-.empty{padding:24px;text-align:center;color:#aeaeb2}
 .hidden{display:none!important}
-.toast{position:fixed;bottom:30px;left:50%;transform:translateX(-50%);background:#1c1c1e;color:#fff;padding:12px 24px;border-radius:12px;font-size:14px;z-index:999;opacity:0;transition:opacity .25s;pointer-events:none}
+.toast{position:fixed;bottom:30px;left:50%;transform:translateX(-50%);background:#1c1c1e;color:#fff;padding:12px 24px;border-radius:12px;font-size:14px;z-index:999;opacity:0;transition:.25s;pointer-events:none}
 .toast.show{opacity:1}
-.del-btn{padding:4px 8px;border:none;border-radius:6px;background:#ff3b30;color:#fff;cursor:pointer;font-size:11px;font-weight:600}
-.conn-info{text-align:center;font-size:12px;padding:6px;border-radius:8px;margin-bottom:6px}
-.conn-info.ok{background:#d1fae5;color:#065f46}
-.conn-info.fail{background:#fee2e2;color:#991b1b}
+.status{text-align:center;font-size:13px;padding:6px 0;color:#8e8e93}
 </style>
 </head>
 <body>
 
 <h1>QR → Excel</h1>
-
-<div class="conn-info ok" id="tgStatus">Telegram: OK</div>
 
 <div class="card">
   <button class="btn btn-primary" id="btnScan">Сканировать чек</button>
@@ -64,21 +53,8 @@ th{font-size:10px;color:#8e8e93;background:#fafafa}
   <div class="preview" id="preview"></div>
   <label style="font-size:13px;color:#8e8e93;margin:6px 0 3px">Наименование товара</label>
   <input class="field" id="fieldProduct" placeholder="Например: Молоко..." autocomplete="off">
-  <button class="btn btn-success" id="btnSave">Сохранить и отправить</button>
+  <button class="btn btn-success" id="btnSend">Отправить в Telegram</button>
   <button class="btn btn-gray" id="btnSkip">Без названия</button>
-  <button class="btn btn-gray" id="btnCancel">Отмена</button>
-</div>
-
-<div class="card">
-  <div class="table-wrap">
-    <table><thead><tr><th>#</th><th>Дата</th><th>Товар</th><th>Сумма</th><th></th></tr></thead>
-    <tbody id="tbody"></tbody></table>
-    <div class="empty" id="emptyMsg">Нет записей</div>
-  </div>
-  <div id="actions" class="hidden" style="margin-top:8px">
-    <button class="btn btn-success" id="btnSendAll">Отправить все в Telegram</button>
-    <button class="btn btn-danger" id="btnClear">Очистить</button>
-  </div>
 </div>
 
 <div class="toast" id="toast"></div>
@@ -86,42 +62,11 @@ th{font-size:10px;color:#8e8e93;background:#fafafa}
 <script>
 var TG='https://api.telegram.org/bot8816604840:AAGhrlFMgrz71sNgKxhgPnJvdmu0gbjtYEw';
 var CHAT='8881681054';
-var entries=JSON.parse(localStorage.getItem('q')||'[]');
 var qr=null,scanning=false,lastData=null,tt=null;
 
 function $(i){return document.getElementById(i)}
 function tm(m,e){clearTimeout(tt);var t=$('toast');t.textContent=m;t.style.background=e?'#ff3b30':'#1c1c1e';t.classList.add('show');tt=setTimeout(function(){t.classList.remove('show')},2500)}
 function pr(t){var d={date:'',sum:'',num:''};try{var p=t.startsWith('http')?new URL(t).searchParams:new URLSearchParams(t);d.num=p.get('i')||p.get('fd')||'';d.sum=p.get('s')||'';var v=p.get('t')||'';if(v){var m=v.match(/^(\d{4})(\d{2})(\d{2})/);if(m)d.date=m[3]+'.'+m[2]+'.'+m[1]}}catch(e){}return d}
-
-async function tgSend(msg){
-  try{
-    var r=await fetch(TG+'/sendMessage',{
-      method:'POST',
-      headers:{'Content-Type':'application/x-www-form-urlencoded'},
-      body:'chat_id='+CHAT+'&text='+encodeURIComponent(msg)
-    });
-    return (await r.json()).ok
-  }catch(e){return false}
-}
-
-function formatEntry(e,i){
-  return (i+1)+'. '+('  '+(i+1)).slice(-3)+' | '+(e.date||'--')+' | '+(e.product||'--')+' | '+(e.sum||'0')+' р.'
-}
-
-function formatAll(){
-  var s='';
-  s+='📄 ЧЕКИ\n';
-  s+='═══════════════════════════════\n';
-  s+='  N  | Дата       | Товар                | Сумма\n';
-  s+='─────┼────────────┼──────────────────────┼────────\n';
-  entries.forEach(function(e,i){
-    s+=(i+1+'').padStart(3)+'. '+(e.date||'--')+' '+(e.product||'--').padEnd(20)+' '+(e.sum||'0')+'\n';
-  });
-  s+='═══════════════════════════════\n';
-  var total=0;entries.forEach(function(e){total+=parseFloat(e.sum)||0});
-  s+='ИТОГО: '+total.toFixed(2)+' р.\n';
-  return s
-}
 
 async function sc(){
   if(scanning)return;
@@ -131,52 +76,30 @@ async function sc(){
     qr=new Html5Qrcode("reader");
     await qr.start({facingMode:"environment"},{fps:10,qrbox:{width:250,height:250}},
       function(t){if(scanning){scanning=false;sp();sr(t)}},function(){});
-    scanning=true;$('scanStatus').textContent='Наведите камеру на QR-код чека'
+    scanning=true;$('scanStatus').textContent='Наведите камеру на QR-код'
   }catch(e){$('scanStatus').textContent='Ошибка: '+e.message;setTimeout(function(){$('scannerWrap').classList.remove('active')},2000)}
 }
 function sp(){if(qr){try{qr.stop();qr.clear()}catch(e){}qr=null}scanning=false;$('scannerWrap').classList.remove('active')}
 function sr(r){lastData=pr(r);$('preview').innerHTML='<strong>Дата:</strong> '+(lastData.date||'—')+'<br><strong>Сумма:</strong> '+(lastData.sum||'—')+'<br><strong>Номер:</strong> '+(lastData.num||'—');$('fieldProduct').value='';$('resultCard').classList.remove('hidden');setTimeout(function(){$('fieldProduct').focus()},300)}
-function ad(p){if(!lastData)return null;var e={date:lastData.date,sum:lastData.sum,number:lastData.num,product:p||''};entries.push(e);localStorage.setItem('q',JSON.stringify(entries));rt();return e}
 
 async function doSend(product){
-  var e=ad(product);if(!e)return;
-  var msg=formatEntry(e,entries.length-1);
-  var ok=await tgSend(msg);
-  if(ok){tm('Отправлено в Telegram')}else{tm('Ошибка отправки',1)}
-  $('resultCard').classList.add('hidden');lastData=null
+  if(!lastData)return;
+  var msg='📄 Чек\nДата: '+(lastData.date||'—')+'\nТовар: '+(product||'—')+'\nСумма: '+(lastData.sum||'—')+'\nНомер: '+(lastData.num||'—');
+  try{
+    var r=await fetch(TG+'/sendMessage',{
+      method:'POST',
+      headers:{'Content-Type':'application/x-www-form-urlencoded'},
+      body:'chat_id='+CHAT+'&text='+encodeURIComponent(msg)
+    });
+    var j=await r.json();
+    if(j.ok){tm('Отправлено!');$('resultCard').classList.add('hidden');lastData=null}
+    else{tm('Ошибка: '+(j.description||'?'),1)}
+  }catch(e){tm('Нет интернета',1)}
 }
 
-$('btnSave').onclick=function(){doSend($('fieldProduct').value.trim())};
+$('btnSend').onclick=function(){doSend($('fieldProduct').value.trim())};
 $('btnSkip').onclick=function(){doSend('')};
-$('btnCancel').onclick=function(){$('resultCard').classList.add('hidden');lastData=null};
 $('btnScan').onclick=sc;$('btnStop').onclick=sp;
-
-function rt(){
-  var tb=$('tbody'),em=$('emptyMsg'),ac=$('actions');
-  tb.innerHTML='';
-  if(!entries.length){em.classList.remove('hidden');ac.classList.add('hidden');return}
-  em.classList.add('hidden');ac.classList.remove('hidden');
-  entries.forEach(function(e,i){
-    var tr=document.createElement('tr');
-    tr.innerHTML='<td>'+(i+1)+'</td><td>'+(e.date||'—')+'</td><td>'+(e.product||'—')+'</td><td>'+(e.sum||'—')+'</td><td><button class="del-btn" data-i="'+i+'">X</button></td>';
-    tb.appendChild(tr)
-  });
-  tb.querySelectorAll('.del-btn').forEach(function(b){
-    b.onclick=function(){entries.splice(+this.dataset.i,1);localStorage.setItem('q',JSON.stringify(entries));rt()}
-  })
-}
-
-$('btnSendAll').onclick=async function(){
-  if(!entries.length){tm('Нет записей',1);return}
-  var btn=this;btn.disabled=true;btn.innerHTML='Отправка...';
-  var msg=formatAll();
-  var ok=await tgSend(msg);
-  if(ok){tm('Все чеки отправлены в Telegram')}else{tm('Ошибка отправки',1)}
-  btn.disabled=false;btn.innerHTML='Отправить все в Telegram'
-};
-
-$('btnClear').onclick=function(){if(!confirm('Удалить всё?'))return;entries=[];localStorage.setItem('q','[]');rt();tm('Очищено')};
-rt();
 </script>
 </body>
 </html>
