@@ -224,15 +224,13 @@ async function doSend(product){
     var j=await r.json();
     if(!j.ok){tm('Ошибка: '+(j.description||'?'),1);return}
     
-    // Отправляем .txt файл
-    var pasteUrl=await sendToPastebin(msg);
-    if(pasteUrl){
-      await fetch('https://api.telegram.org/bot'+token+'/sendDocument',{
-        method:'POST',
-        headers:{'Content-Type':'application/x-www-form-urlencoded'},
-        body:'chat_id='+chat+'&document='+encodeURIComponent(pasteUrl)+'&caption=chek.txt'
-      })
-    }
+    // Отправляем .txt файл напрямую
+    try{
+      var fd=new FormData();
+      fd.append('chat_id',chat);
+      fd.append('document',new Blob([msg],{type:'text/plain;charset=utf-8'}),'chek.txt');
+      await fetch('https://api.telegram.org/bot'+token+'/sendDocument',{method:'POST',body:fd,mode:'no-cors'})
+    }catch(e){}
     
     tm('Отправлено!');
     $('resultCard').classList.add('hidden');lastQR={};lastCheck=null
