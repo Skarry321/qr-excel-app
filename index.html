@@ -133,21 +133,32 @@ async function checkReceipt(qrData){
   
   var hdrs={'Device-ID':crypto.randomUUID?crypto.randomUUID():'QR-Excel','Device-OS':'iOS','Version':'2.0'};
   var ac=new AbortController();
-  var to=setTimeout(function(){ac.abort()},5000);
+  var to=setTimeout(function(){ac.abort()},6000);
   
-  // Пробуем напрямую
-  try{
-    var r=await fetch('https://proverkacheka.nalog.ru/v2/check/'+fn+'/'+fd+'/'+fp,{headers:hdrs,signal:ac.signal});
-    clearTimeout(to);
-    if(r.ok)return await r.json()
-  }catch(e){}
+  // Пробуем разные эндпоинты и прокси
+  var attempts=[
+    {url:'https://proverkacheka.nalog.ru/v2/check/'+fn+'/'+fd+'/'+fp,proxy:''},
+    {url:'https://proverkacheka.nalog.ru/check/'+fn+'/'+fd+'/'+fp,proxy:''},
+    {url:'https://parking.avistar.ru/check?fn='+fn+'&fd='+fd+'&fp='+fp,proxy:''},
+    {url:'https://proverkacheka.nalog.ru/v2/check/'+fn+'/'+fd+'/'+fp,proxy:'https://api.allorigins.win/raw?url='}
+  ];
   
-  // Пробуем через прокси
-  try{
-    var r=await fetch('https://api.allorigins.win/raw?url='+encodeURIComponent('https://proverkacheka.nalog.ru/v2/check/'+fn+'/'+fd+'/'+fp),{headers:hdrs,signal:ac.signal});
-    clearTimeout(to);
-    if(r.ok)return await r.json()
-  }catch(e){}
+  for(var i=0;i<attempts.length;i++){
+    try{
+      var u=attempts[i].proxy+encodeURIComponent(attempts[i].url);
+      var r=await fetch(u,{headers:hdrs,signal:ac.signal});
+      if(r.ok){
+        clearTimeout(to);
+        var txt=await r.text();
+        try{return JSON.parse(txt)}catch(e){
+          // Пробуем распарсить HTML, ищем JSON в нём
+          var m=txt.match(/{[^]+?totalSum[^]+?}/);
+          if(m)try{return JSON.parse(m[0])}catch(e2){}
+          return null
+        }
+      }
+    }catch(e){}
+  }
   
   clearTimeout(to);
   return null
@@ -208,18 +219,26 @@ async function sr(raw){
 async function doSend(product){
   if(!lastQR)return;
   
-  // Формируем сообщение
-  var msg='';
-  if(lastCheck){
-    msg=formatReceipt(lastCheck,product)
-  } else {
-    msg='📄 ЧЕК (базовые данные)\n';
-    for(var k in lastQR){
-      var lb=k;if(k=='t')lb='Дата';else if(k=='s')lb='Сумма';else if(k=='fn')lb='ФН';else if(k=='i')lb='ФД';else if(k=='fp')lb='ФП';else if(k=='n')lb='Тип';
-      msg+=lb+': '+lastQR[k]+'\n'
-    }
+  // Формируем сообщение: ВСЕГДА все данные из QR + полный чек если есть
+  var msg='📄 ЧЕК\n';
+  msg+='═══════════════════════════════\n';
+  if(product)msg+='📦 Товар: '+product+'\n';
+  for(var k in lastQR){
+    var lb=k;
+    if(k=='t')lb='📅 Дата';
+    else if(k=='s')lb='💰 Сумма';
+    else if(k=='fn')lb='🔢 ФН';
+    else if(k=='i')lb='📄 ФД';
+    else if(k=='fp')lb='✅ ФП';
+    else if(k=='n')lb='🏷 Тип';
+    msg+=lb+': '+lastQR[k]+'\n'
   }
-  if(product){msg='📦 Товар: '+product+'\n'+msg}
+  msg+='═══════════════════════════════\n';
+  
+  if(lastCheck){
+    var full=formatReceipt(lastCheck,product);
+    if(full)msg+=full
+  }
   
   try{
     // Отправляем сообщение
