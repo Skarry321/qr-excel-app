@@ -26,30 +26,17 @@ h1{font-size:24px;padding:16px 0 2px;text-align:center;background:linear-gradien
 #reader__dashboard_section{display:none}
 .field{width:100%;padding:12px;border:2px solid #e5e5ea;border-radius:12px;font-size:15px;outline:none;margin:4px 0;background:#f9f9f9}
 .field:focus{border-color:#4361ee}
-.preview{background:#f2f2f7;border-radius:12px;padding:10px;margin:4px 0;font-size:12px;line-height:1.5;word-break:break-all;max-height:200px;overflow-y:auto}
+.preview{background:#f2f2f7;border-radius:12px;padding:10px;margin:4px 0;font-size:12px;line-height:1.5}
 .preview strong{color:#4361ee}
 .hidden{display:none!important}
 .toast{position:fixed;bottom:30px;left:50%;transform:translateX(-50%);background:#1c1c1e;color:#fff;padding:12px 24px;border-radius:12px;font-size:14px;z-index:999;opacity:0;transition:.25s;pointer-events:none}
 .toast.show{opacity:1}
 .status{text-align:center;font-size:13px;padding:6px 0;color:#8e8e93}
-.s-label{font-size:12px;font-weight:600;color:#8e8e93;margin:6px 0 2px;display:block}
-.setup-bar{background:#f0f7ff;border:1px solid #bddbff;border-radius:10px;padding:10px 12px;margin-bottom:8px;font-size:12px;color:#1a404e;line-height:1.6}
-.setup-bar .row{display:flex;gap:4px;align-items:center}
-.setup-bar .row input{flex:1;padding:6px 8px;border:1px solid #bddbff;border-radius:6px;font-size:12px;outline:none}
-.setup-bar .row button{padding:6px 10px;border:none;border-radius:6px;background:#4361ee;color:#fff;cursor:pointer;font-size:11px;font-weight:600}
 </style>
 </head>
 <body>
 
 <h1>QR → Excel</h1>
-
-<div class="setup-bar">
-  <div class="row">
-    <input id="cfgToken" placeholder="Token" value="8816604840:AAGhrlFMgrz71sNgKxhgPnJvdmu0gbjtYEw">
-    <input id="cfgChat" placeholder="Chat ID" value="8881681054">
-    <button id="btnSave">Save</button>
-  </div>
-</div>
 
 <div class="card">
   <button class="btn btn-primary" id="btnScan">Сканировать чек</button>
@@ -64,135 +51,20 @@ h1{font-size:24px;padding:16px 0 2px;text-align:center;background:linear-gradien
   <div class="preview" id="preview"></div>
   <label style="font-size:13px;color:#8e8e93;margin:6px 0 3px">Наименование товара</label>
   <input class="field" id="fieldProduct" placeholder="Например: Молоко..." autocomplete="off">
-  <button class="btn btn-success" id="btnSend">Отправить в Telegram</button>
+  <button class="btn btn-success" id="btnSend">Отправить</button>
   <button class="btn btn-gray" id="btnSkip">Без названия</button>
 </div>
 
 <div class="toast" id="toast"></div>
 
 <script>
-var token=localStorage.getItem('tk')||'8816604840:AAGhrlFMgrz71sNgKxhgPnJvdmu0gbjtYEw';
-var chat=localStorage.getItem('ch')||'8881681054';
-var qr=null,scanning=false,lastRaw='',lastQR={},lastCheck=null,tt=null;
+var entries=JSON.parse(localStorage.getItem('q')||'[]');
+var qr=null,scanning=false,lastData=null,lastRaw='',tt=null;
 
 function $(i){return document.getElementById(i)}
 function tm(m,e){clearTimeout(tt);var t=$('toast');t.textContent=m;t.style.background=e?'#ff3b30':'#1c1c1e';t.classList.add('show');tt=setTimeout(function(){t.classList.remove('show')},2500)}
 
-function parseQR(t){
-  var d={};
-  try{
-    var p=t.startsWith('http')?new URL(t).searchParams:new URLSearchParams(t);
-    for(var k of p.keys()){d[k]=p.get(k)}
-  }catch(e){}
-  return d
-}
-
-function kopToRub(k){return (k/100).toFixed(2)}
-
-function formatReceipt(check,product){
-  if(!check)return null;
-  var r=check;
-  if(r.document&&r.document.receipt)r=r.document.receipt;
-  if(r.receipt)r=r.receipt;
-  if(!r.totalSum&&!r.items)return null;
-  var s='';
-  s+='📄 ПОЛНЫЙ ЧЕК\n';
-  s+='═══════════════════════════════\n';
-  if(product)s+='📦 Товар: '+product+'\n';
-  
-  // Все поля из ответа (кроме items, которое форматируем отдельно)
-  var fields={
-    'user':'🏪 Продавец','userInn':'🔢 ИНН',
-    'dateTime':'📅 Дата','operator':'👤 Кассир','operatorInn':'🆔 Кассир ИНН',
-    'kktRegId':'🖨 ККТ','ecrRegNumber':'🔢 Номер ЭКЛЗ',
-    'fiscalDriveNumber':'🔢 ФН','fiscalDocumentNumber':'📄 ФД','fiscalSign':'✅ ФП',
-    'totalSum':'💰 ИТОГО','cashTotalSum':'💵 Наличные','ecashTotalSum':'💳 Безналичные',
-    'creditSum':'💳 Кредит','prepaidSum':'💰 Предоплата','postpaidSum':'💰 Постоплата',
-    'taxationType':'🏷 Система налогообложения','appliedTaxationType':'🏷 Налог',
-    'nds0':'📊 НДС 0%','nds10':'📊 НДС 10%','nds18':'📊 НДС 18%',
-    'ndsCalculated10':'📊 НДС расч.10','ndsCalculated18':'📊 НДС расч.18',
-    'fiscalDocumentFormatVer':'📄 Версия формата','addressToCheckFiscal':'🔗 Ссылка',
-    'email':'📧 Email','phone':'📞 Телефон'
-  };
-  
-  for(var key in fields){
-    if(r[key]!==undefined&&r[key]!==null&&r[key]!==''){
-      var val=r[key];
-      if(key=='totalSum'||key=='cashTotalSum'||key=='ecashTotalSum'||key=='creditSum'||key=='prepaidSum'||key=='postpaidSum'||key=='nds0'||key=='nds10'||key=='nds18'||key=='ndsCalculated10'||key=='ndsCalculated18'){
-        val=kopToRub(val)
-      }
-      if(key=='dateTime'&&typeof val=='string'){val=val.replace('T',' ').slice(0,16)}
-      s+=fields[key]+': '+val+'\n'
-    }
-  }
-  
-  // Все остальные поля, которые не в списке
-  for(var key in r){
-    if(!fields[key]&&key!='items'&&key!='stornoItems'&&key!='modifiers'&&typeof r[key]!='object'){
-      if(r[key]!==null&&r[key]!=='')s+='📌 '+key+': '+r[key]+'\n'
-    }
-  }
-  
-  // Товары
-  if(r.items&&r.items.length){
-    s+='═══════════════════════════════\n';
-    s+='  ТОВАРЫ:\n';
-    r.items.forEach(function(item,i){
-      var name=item.name||'—';
-      var price=kopToRub(item.price||0);
-      var qty=item.quantity||1;
-      var sum=kopToRub(item.sum||0);
-      s+='  '+(i+1)+'. '+name+'\n';
-      s+='     Цена: '+price+' x '+qty+' = '+sum;
-      if(item.nds){(item.nds);s+=' (НДС:'+item.nds+')'}
-      s+='\n'
-    })
-  }
-  
-  s+='═══════════════════════════════\n';
-  return s
-}
-
-async function checkReceipt(qrData){
-  var fn=qrData.fn||'';
-  var fd=qrData.i||'';
-  var fp=qrData.fp||'';
-  if(!fn||!fd||!fp)return null;
-  
-  var hdrs={'Device-ID':crypto.randomUUID?crypto.randomUUID():'QR-Excel','Device-OS':'iOS','Version':'2.0'};
-  var ac=new AbortController();
-  var to=setTimeout(function(){ac.abort()},6000);
-  
-  // Пробуем разные эндпоинты и прокси
-  var attempts=[
-    {url:'https://proverkacheka.nalog.ru/v2/check/'+fn+'/'+fd+'/'+fp,proxy:''},
-    {url:'https://proverkacheka.nalog.ru/check/'+fn+'/'+fd+'/'+fp,proxy:''},
-    {url:'https://receipt.tax/api/v1/check?fn='+fn+'&fd='+fd+'&fp='+fp+'&s='+(qrData.s||''),proxy:''},
-    {url:'https://check.ofd.ru/check/'+fn+'/'+fd+'/'+fp,proxy:''},
-    {url:'https://proverkacheka.nalog.ru/v2/check/'+fn+'/'+fd+'/'+fp,proxy:'https://api.allorigins.win/raw?url='},
-    {url:'https://receipt.tax/api/v1/check?fn='+fn+'&fd='+fd+'&fp='+fp,proxy:'https://api.allorigins.win/raw?url='}
-  ];
-  
-  for(var i=0;i<attempts.length;i++){
-    try{
-      var u=attempts[i].proxy+encodeURIComponent(attempts[i].url);
-      var r=await fetch(u,{headers:hdrs,signal:ac.signal});
-      if(r.ok){
-        clearTimeout(to);
-        var txt=await r.text();
-        try{return JSON.parse(txt)}catch(e){
-          // Пробуем распарсить HTML, ищем JSON в нём
-          var m=txt.match(/{[^]+?totalSum[^]+?}/);
-          if(m)try{return JSON.parse(m[0])}catch(e2){}
-          return null
-        }
-      }
-    }catch(e){}
-  }
-  
-  clearTimeout(to);
-  return null
-}
+function pr(t){var d={};try{var p=t.startsWith('http')?new URL(t).searchParams:new URLSearchParams(t);for(var k of p.keys()){d[k]=p.get(k)}}catch(e){}return d}
 
 async function sc(){
   if(scanning)return;
@@ -206,102 +78,34 @@ async function sc(){
   }catch(e){$('scanStatus').textContent='Ошибка: '+e.message;setTimeout(function(){$('scannerWrap').classList.remove('active')},2000)}
 }
 function sp(){if(qr){try{qr.stop();qr.clear()}catch(e){}qr=null}scanning=false;$('scannerWrap').classList.remove('active')}
-
-async function sr(raw){
-  lastRaw=raw;
-  lastQR=parseQR(raw);
-  
-  var fn=lastQR.fn||'';var fd=lastQR.i||'';var fp=lastQR.fp||'';
-  var nalogLink=fn?'https://proverkacheka.nalog.ru/check/'+fn+'/'+fd+'/'+fp:'';
-  
-  var html='<strong>QR данные:</strong><br>';
-  for(var k in lastQR){
-    var lb=k;if(k=='t')lb='Дата';else if(k=='s')lb='Сумма';else if(k=='fn')lb='ФН';else if(k=='i')lb='ФД';else if(k=='fp')lb='ФП';else if(k=='n')lb='Тип';
-    if(k=='fn'||k=='i'||k=='fp'||k=='t'||k=='s'){
-      html+='<strong>'+lb+':</strong> '+lastQR[k]+'<br>'
-    }
-  }
-  if(nalogLink)html+='<br><a href="'+nalogLink+'" target="_blank" style="color:#4361ee;font-size:12px">Открыть чек на nalog.ru</a>';
-  
-  html+='<br><em>Загрузка полных данных...</em>';
-  $('preview').innerHTML=html;
-  $('resultCard').classList.remove('hidden');
-  
-  // Запрос полных данных (максимум 5 сек)
-  var tStart=Date.now();
-  lastCheck=await checkReceipt(lastQR);
-  var elapsed=((Date.now()-tStart)/1000).toFixed(1);
-  
-  if(lastCheck){
-    var full=formatReceipt(lastCheck,'');
-    if(full){
-      var short=full.split('\n').slice(0,6).join('<br>');
-      $('preview').innerHTML=html+'<br><strong>Полные данные ('+elapsed+'c)</strong><br>'+short+'<br>...'
-    }
-  } else {
-    $('preview').innerHTML=html.replace('<em>Загрузка полных данных...</em>','')+'<br><em>API не ответил ('+elapsed+'c). Отправлю базовые данные.</em>'
-  }
-  
-  $('fieldProduct').value='';
-  setTimeout(function(){$('fieldProduct').focus()},300)
-}
+function sr(r){lastRaw=r;lastData=pr(r);var h='';for(var k in lastData){var lb=k;if(k=='t')lb='Дата';else if(k=='s')lb='Сумма';else if(k=='fn')lb='ФН';else if(k=='i')lb='ФД';else if(k=='fp')lb='ФП';h+='<strong>'+lb+':</strong> '+lastData[k]+'<br>'};$('preview').innerHTML=h;$('fieldProduct').value='';$('resultCard').classList.remove('hidden');setTimeout(function(){$('fieldProduct').focus()},300)}
 
 async function doSend(product){
-  if(!lastQR)return;
+  if(!lastData)return;
+  var btn=$('btnSend');btn.disabled=true;btn.innerHTML='Отправка...';
   
-  // Формируем сообщение: ВСЕГДА все данные из QR + полный чек если есть
-  var msg='📄 ЧЕК\n';
-  msg+='═══════════════════════════════\n';
-  if(product)msg+='📦 Товар: '+product+'\n';
-  for(var k in lastQR){
-    var lb=k;
-    if(k=='t')lb='📅 Дата';
-    else if(k=='s')lb='💰 Сумма';
-    else if(k=='fn')lb='🔢 ФН';
-    else if(k=='i')lb='📄 ФД';
-    else if(k=='fp')lb='✅ ФП';
-    else if(k=='n')lb='🏷 Тип';
-    msg+=lb+': '+lastQR[k]+'\n'
-  }
-  msg+='═══════════════════════════════\n';
-  
-  if(lastCheck){
-    var full=formatReceipt(lastCheck,product);
-    if(full)msg+=full
-  }
+  // Сохраняем локально
+  entries.push({date:lastData.t||'',sum:lastData.s||'',product:product||'',num:lastData.i||''});
+  localStorage.setItem('q',JSON.stringify(entries));
   
   try{
-    // Отправляем сообщение
-    var r=await fetch('https://api.telegram.org/bot'+token+'/sendMessage',{
+    var r=await fetch('/send',{
       method:'POST',
-      headers:{'Content-Type':'application/x-www-form-urlencoded'},
-      body:'chat_id='+chat+'&text='+encodeURIComponent(msg)
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({qr:lastData,product:product,entries:entries})
     });
-    var j=await r.json();
-    if(!j.ok){tm('Ошибка: '+(j.description||'?'),1);return}
-    
-    // Отправляем .txt файл напрямую
-    try{
-      var fd=new FormData();
-      fd.append('chat_id',chat);
-      fd.append('document',new Blob([msg],{type:'text/plain;charset=utf-8'}),'chek.txt');
-      await fetch('https://api.telegram.org/bot'+token+'/sendDocument',{method:'POST',body:fd,mode:'no-cors'})
-    }catch(e){}
-    
-    tm('Отправлено!');
-    $('resultCard').classList.add('hidden');lastQR={};lastCheck=null
-  }catch(e){tm('Нет интернета',1)}
+    if(r.ok){tm('Готово! Данные в Telegram и Excel на ПК');$('resultCard').classList.add('hidden');lastData=null}
+    else{
+      var t=await r.text();
+      tm('Ошибка: '+t,1)
+    }
+  }catch(e){tm('Нет соединения с ПК. Запустите qr-excel.exe на ПК',1)}
+  btn.disabled=false;btn.innerHTML='Отправить'
 }
 
-$('btnSave').onclick=function(){
-  token=$('cfgToken').value.trim();chat=$('cfgChat').value.trim();
-  localStorage.setItem('tk',token);localStorage.setItem('ch',chat);
-  tm('Сохранено')
-};
 $('btnSend').onclick=function(){doSend($('fieldProduct').value.trim())};
 $('btnSkip').onclick=function(){doSend('')};
 $('btnScan').onclick=sc;$('btnStop').onclick=sp;
-$('cfgToken').value=token;$('cfgChat').value=chat;
 </script>
 </body>
 </html>
