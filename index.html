@@ -90,8 +90,12 @@ function parseQR(t){
 function kopToRub(k){return (k/100).toFixed(2)}
 
 function formatReceipt(check,product){
-  if(!check||!check.document)return null;
-  var r=check.document.receipt;
+  if(!check)return null;
+  // Нормализуем ответ (разные API возвращают разную структуру)
+  var r=check;
+  if(r.document&&r.document.receipt)r=r.document.receipt;
+  if(r.receipt)r=r.receipt;
+  if(!r.items&&!r.totalSum&&!r.user)return null;
   var s='';
   s+='📄 ПОЛНЫЙ ЧЕК\n';
   s+='═══════════════════════════════\n';
@@ -125,26 +129,30 @@ async function checkReceipt(qrData){
   var fn=qrData.fn||'';
   var fd=qrData.i||'';
   var fp=qrData.fp||'';
+  var sum=qrData.s||'';
   if(!fn||!fd||!fp)return null;
   
-  try{
-    var r=await fetch('https://proverkacheka.nalog.ru/check/'+fn+'/'+fd+'/'+fp,{
-      headers:{
-        'Device-ID': crypto.randomUUID?crypto.randomUUID():'QR-Excel-001',
-        'Device-OS':'iOS',
-        'Version':'2.0'
+  var proxy='https://corsproxy.io/?';
+  var hdrs={'Device-ID':crypto.randomUUID?crypto.randomUUID():'QR-Excel','Device-OS':'iOS','Version':'2.0'};
+  
+  // Пробуем nalog API через CORS-прокси
+  var apis=[
+    'https://proverkacheka.nalog.ru/v2/check/'+fn+'/'+fd+'/'+fp,
+    'https://proverkacheka.nalog.ru/check/'+fn+'/'+fd+'/'+fp,
+    'https://check.ofd.ru/check/'+fn+'/'+fd+'/'+fp,
+    'https://receipt.tax/api/check?fn='+fn+'&fd='+fd+'&fp='+fp+'&s='+sum
+  ];
+  
+  for(var i=0;i<apis.length;i++){
+    try{
+      var r=await fetch(proxy+encodeURIComponent(apis[i]),{headers:hdrs});
+      if(r.ok){
+        var txt=await r.text();
+        try{return JSON.parse(txt)}catch(e){return txt}
       }
-    });
-    if(!r.ok){
-      // Попробовать v2
-      var r2=await fetch('https://proverkacheka.nalog.ru/v2/check/'+fn+'/'+fd+'/'+fp,{
-        headers:{'Device-ID':crypto.randomUUID?crypto.randomUUID():'QR-Excel-001','Device-OS':'iOS','Version':'2.0'}
-      });
-      if(!r2.ok)return null;
-      return await r2.json()
-    }
-    return await r.json()
-  }catch(e){return null}
+    }catch(e){}
+  }
+  return null
 }
 
 async function sc(){
