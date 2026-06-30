@@ -91,37 +91,65 @@ function kopToRub(k){return (k/100).toFixed(2)}
 
 function formatReceipt(check,product){
   if(!check)return null;
-  // Нормализуем ответ (разные API возвращают разную структуру)
   var r=check;
   if(r.document&&r.document.receipt)r=r.document.receipt;
   if(r.receipt)r=r.receipt;
-  if(!r.items&&!r.totalSum&&!r.user)return null;
+  if(!r.totalSum&&!r.items)return null;
   var s='';
   s+='📄 ПОЛНЫЙ ЧЕК\n';
   s+='═══════════════════════════════\n';
-  s+='📦 Товар: '+(product||'—')+'\n';
-  s+='🏪 Продавец: '+(r.user||'—')+'\n';
-  s+='🔢 ИНН: '+(r.userInn||'—')+'\n';
-  if(r.dateTime){var dt=r.dateTime.replace('T',' ').slice(0,16);s+='📅 '+dt+'\n'}
-  s+='═══════════════════════════════\n';
-  s+='  Товары:\n';
+  if(product)s+='📦 Товар: '+product+'\n';
+  
+  // Все поля из ответа (кроме items, которое форматируем отдельно)
+  var fields={
+    'user':'🏪 Продавец','userInn':'🔢 ИНН',
+    'dateTime':'📅 Дата','operator':'👤 Кассир','operatorInn':'🆔 Кассир ИНН',
+    'kktRegId':'🖨 ККТ','ecrRegNumber':'🔢 Номер ЭКЛЗ',
+    'fiscalDriveNumber':'🔢 ФН','fiscalDocumentNumber':'📄 ФД','fiscalSign':'✅ ФП',
+    'totalSum':'💰 ИТОГО','cashTotalSum':'💵 Наличные','ecashTotalSum':'💳 Безналичные',
+    'creditSum':'💳 Кредит','prepaidSum':'💰 Предоплата','postpaidSum':'💰 Постоплата',
+    'taxationType':'🏷 Система налогообложения','appliedTaxationType':'🏷 Налог',
+    'nds0':'📊 НДС 0%','nds10':'📊 НДС 10%','nds18':'📊 НДС 18%',
+    'ndsCalculated10':'📊 НДС расч.10','ndsCalculated18':'📊 НДС расч.18',
+    'fiscalDocumentFormatVer':'📄 Версия формата','addressToCheckFiscal':'🔗 Ссылка',
+    'email':'📧 Email','phone':'📞 Телефон'
+  };
+  
+  for(var key in fields){
+    if(r[key]!==undefined&&r[key]!==null&&r[key]!==''){
+      var val=r[key];
+      if(key=='totalSum'||key=='cashTotalSum'||key=='ecashTotalSum'||key=='creditSum'||key=='prepaidSum'||key=='postpaidSum'||key=='nds0'||key=='nds10'||key=='nds18'||key=='ndsCalculated10'||key=='ndsCalculated18'){
+        val=kopToRub(val)
+      }
+      if(key=='dateTime'&&typeof val=='string'){val=val.replace('T',' ').slice(0,16)}
+      s+=fields[key]+': '+val+'\n'
+    }
+  }
+  
+  // Все остальные поля, которые не в списке
+  for(var key in r){
+    if(!fields[key]&&key!='items'&&key!='stornoItems'&&key!='modifiers'&&typeof r[key]!='object'){
+      if(r[key]!==null&&r[key]!=='')s+='📌 '+key+': '+r[key]+'\n'
+    }
+  }
+  
+  // Товары
   if(r.items&&r.items.length){
+    s+='═══════════════════════════════\n';
+    s+='  ТОВАРЫ:\n';
     r.items.forEach(function(item,i){
       var name=item.name||'—';
       var price=kopToRub(item.price||0);
       var qty=item.quantity||1;
       var sum=kopToRub(item.sum||0);
       s+='  '+(i+1)+'. '+name+'\n';
-      s+='     Цена: '+price+' x '+qty+' = '+sum+'\n'
+      s+='     Цена: '+price+' x '+qty+' = '+sum;
+      if(item.nds){(item.nds);s+=' (НДС:'+item.nds+')'}
+      s+='\n'
     })
   }
+  
   s+='═══════════════════════════════\n';
-  s+='💰 ИТОГО: '+kopToRub(r.totalSum||0)+'\n';
-  s+='🔢 ФН: '+(r.fiscalDriveNumber||'—')+'\n';
-  s+='📄 ФД: '+(r.fiscalDocumentNumber||'—')+'\n';
-  s+='✅ ФП: '+(r.fiscalSign||'—')+'\n';
-  if(r.kktRegId)s+='🖨 ККТ: '+r.kktRegId+'\n';
-  if(r.operator)s+='👤 Кассир: '+r.operator+'\n';
   return s
 }
 
