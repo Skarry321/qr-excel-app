@@ -4,8 +4,6 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="QR-Excel">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#4361ee">
 <title>QR → Excel</title>
@@ -34,11 +32,28 @@ h1{font-size:24px;padding:16px 0 2px;text-align:center;background:linear-gradien
 .toast{position:fixed;bottom:30px;left:50%;transform:translateX(-50%);background:#1c1c1e;color:#fff;padding:12px 24px;border-radius:12px;font-size:14px;z-index:999;opacity:0;transition:.25s;pointer-events:none}
 .toast.show{opacity:1}
 .status{text-align:center;font-size:13px;padding:6px 0;color:#8e8e93}
+.s-label{font-size:12px;font-weight:600;color:#8e8e93;margin:6px 0 2px;display:block}
+.s-row{display:flex;gap:6px;align-items:flex-end}
+.s-row .field{flex:1}
+.s-row .btn{width:auto;padding:12px 16px;margin:0;flex-shrink:0}
+.setup-bar{background:#f0f7ff;border:1px solid #bddbff;border-radius:10px;padding:10px 12px;margin-bottom:8px;font-size:12px;color:#1a404e;line-height:1.6}
+.setup-bar .row{display:flex;gap:4px;align-items:center}
+.setup-bar .row input{flex:1;padding:6px 8px;border:1px solid #bddbff;border-radius:6px;font-size:12px;outline:none}
+.setup-bar .row button{padding:6px 10px;border:none;border-radius:6px;background:#4361ee;color:#fff;cursor:pointer;font-size:11px;font-weight:600}
 </style>
 </head>
 <body>
 
 <h1>QR → Excel</h1>
+
+<div class="setup-bar">
+  <div>Token и Chat ID сохраняются автоматически</div>
+  <div class="row" style="margin-top:4px">
+    <input id="cfgToken" placeholder="Token бота" value="8816604840:AAGhrlFMgrz71sNgKxhgPnJvdmu0gbjtYEw">
+    <input id="cfgChat" placeholder="Chat ID" value="8881681054">
+    <button id="btnSave">Сохранить</button>
+  </div>
+</div>
 
 <div class="card">
   <button class="btn btn-primary" id="btnScan">Сканировать чек</button>
@@ -60,13 +75,23 @@ h1{font-size:24px;padding:16px 0 2px;text-align:center;background:linear-gradien
 <div class="toast" id="toast"></div>
 
 <script>
-var TG='https://api.telegram.org/bot8816604840:AAGhrlFMgrz71sNgKxhgPnJvdmu0gbjtYEw';
-var CHAT='8881681054';
+var token=localStorage.getItem('tg_token')||'8816604840:AAGhrlFMgrz71sNgKxhgPnJvdmu0gbjtYEw';
+var chat=localStorage.getItem('tg_chat')||'8881681054';
 var qr=null,scanning=false,lastData=null,tt=null;
 
 function $(i){return document.getElementById(i)}
 function tm(m,e){clearTimeout(tt);var t=$('toast');t.textContent=m;t.style.background=e?'#ff3b30':'#1c1c1e';t.classList.add('show');tt=setTimeout(function(){t.classList.remove('show')},2500)}
 function pr(t){var d={date:'',sum:'',num:''};try{var p=t.startsWith('http')?new URL(t).searchParams:new URLSearchParams(t);d.num=p.get('i')||p.get('fd')||'';d.sum=p.get('s')||'';var v=p.get('t')||'';if(v){var m=v.match(/^(\d{4})(\d{2})(\d{2})/);if(m)d.date=m[3]+'.'+m[2]+'.'+m[1]}}catch(e){}return d}
+
+function loadCfg(){
+  $('cfgToken').value=token;$('cfgChat').value=chat
+}
+
+$('btnSave').onclick=function(){
+  token=$('cfgToken').value.trim();chat=$('cfgChat').value.trim();
+  localStorage.setItem('tg_token',token);localStorage.setItem('tg_chat',chat);
+  tm('Сохранено')
+};
 
 async function sc(){
   if(scanning)return;
@@ -86,10 +111,10 @@ async function doSend(product){
   if(!lastData)return;
   var msg='📄 Чек\nДата: '+(lastData.date||'—')+'\nТовар: '+(product||'—')+'\nСумма: '+(lastData.sum||'—')+'\nНомер: '+(lastData.num||'—');
   try{
-    var r=await fetch(TG+'/sendMessage',{
+    var r=await fetch('https://api.telegram.org/bot'+token+'/sendMessage',{
       method:'POST',
       headers:{'Content-Type':'application/x-www-form-urlencoded'},
-      body:'chat_id='+CHAT+'&text='+encodeURIComponent(msg)
+      body:'chat_id='+chat+'&text='+encodeURIComponent(msg)
     });
     var j=await r.json();
     if(j.ok){tm('Отправлено!');$('resultCard').classList.add('hidden');lastData=null}
@@ -100,6 +125,7 @@ async function doSend(product){
 $('btnSend').onclick=function(){doSend($('fieldProduct').value.trim())};
 $('btnSkip').onclick=function(){doSend('')};
 $('btnScan').onclick=sc;$('btnStop').onclick=sp;
+loadCfg();
 </script>
 </body>
 </html>
