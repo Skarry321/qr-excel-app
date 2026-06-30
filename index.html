@@ -85,6 +85,7 @@ var qr = null, scanning = false, lastData = null, tt = null;
 function $(i){return document.getElementById(i)}
 function tm(m,e){clearTimeout(tt);var t=$('toast');t.textContent=m;t.style.background=e?'#ff3b30':'#1c1c1e';t.classList.add('show');tt=setTimeout(function(){t.classList.remove('show')},2500)}
 function pr(t){var d={date:'',sum:'',num:''};try{var p=t.startsWith('http')?new URL(t).searchParams:new URLSearchParams(t);d.num=p.get('i')||p.get('fd')||'';d.sum=p.get('s')||'';var v=p.get('t')||'';if(v){var m=v.match(/^(\d{4})(\d{2})(\d{2})/);if(m)d.date=m[3]+'.'+m[2]+'.'+m[1]}}catch(e){}return d}
+function f(url,opt){if(!opt)opt={};opt.headers=opt.headers||{};opt.headers['bypass-tunnel-reminder']='1';return fetch(url,opt)}
 function xl(){var wb=XLSX.utils.book_new();var d=[['N','Дата','Наименование','Сумма']];entries.forEach(function(e,i){d.push([i+1,e.date||'',e.product||'',e.sum||''])});var ws=XLSX.utils.aoa_to_sheet(d);ws['!cols']=[{w:5},{w:14},{w:30},{w:12}];XLSX.utils.book_append_sheet(wb,ws,'Чеки');var out=XLSX.write(wb,{bookType:'xlsx',type:'array'});return new Blob([out],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'})}
 
 // Автоподключение: если страница открыта с ПК-сервера
@@ -99,14 +100,14 @@ if (isPcServer) {
   rt();
 } else {
   // На GitHub - пробуем сохраненный адрес
-  var saved = localStorage.getItem('sv');
+var saved = localStorage.getItem('sv');
   if (saved) {
-    fetch(saved+'/ping').then(function(r){return r.text()}).then(function(t){
+    f(saved+'/ping').then(function(r){return r.text()}).then(function(t){
       if(t==='pong'){BASE=saved;$('infoBox').innerHTML='Подключено к ПК: '+BASE;$('infoBox').style.background='#d1fae5';$('infoBox').style.color='#065f46';$('mainUI').classList.remove('hidden');$('listCard').classList.remove('hidden');rt()}
-      else{$('infoBox').innerHTML='<strong>Отсканируйте QR с экрана ПК</strong><br>Запустите qr-excel.exe на ПК → наведите камеру на QR'}
-    }).catch(function(){$('infoBox').innerHTML='<strong>Отсканируйте QR с экрана ПК</strong><br>Запустите qr-excel.exe на ПК → наведите камеру на QR'})
+      else{$('infoBox').innerHTML='Откройте адрес с ПК в браузере телефона'}
+    }).catch(function(){$('infoBox').innerHTML='Откройте адрес с ПК в браузере телефона'})
   } else {
-    $('infoBox').innerHTML='<strong>Отсканируйте QR с экрана ПК</strong><br>Запустите qr-excel.exe на ПК → наведите камеру на QR<br><br>По Bluetooth: спарьте телефон с ПК → на телефоне включите "Bluetooth PAN" → откройте адрес из списка на ПК'
+    $('infoBox').innerHTML='Откройте адрес с ПК в браузере телефона'
   }
 }
 
@@ -147,7 +148,7 @@ function rt(){
 $('btnOpen').onclick=function(){
   if(!entries.length||!BASE)return;
   var btn=this;btn.disabled=true;btn.innerHTML='Отправка...';
-  fetch(BASE+'/open',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({entries:entries})})
+  f(BASE+'/open',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({entries:entries})})
   .then(function(r){if(r.ok){tm('Excel открывается на ПК!');btn.disabled=false;btn.innerHTML='Открыть на ПК'}else{tm('Ошибка',1);btn.disabled=false;btn.innerHTML='Открыть на ПК'}})
   .catch(function(){tm('Нет соединения с ПК',1);btn.disabled=false;btn.innerHTML='Открыть на ПК'})
 };
