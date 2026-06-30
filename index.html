@@ -147,15 +147,6 @@ async function checkReceipt(qrData){
   }catch(e){return null}
 }
 
-async function sendToPastebin(text){
-  try{
-    var r=await fetch('https://clbin.com',{method:'POST',body:text});
-    var url=await r.text();
-    if(url&&url.startsWith('http'))return url.trim()
-  }catch(e){}
-  return null
-}
-
 async function sc(){
   if(scanning)return;
   $('scannerWrap').classList.add('active');
