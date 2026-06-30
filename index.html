@@ -129,29 +129,27 @@ async function checkReceipt(qrData){
   var fn=qrData.fn||'';
   var fd=qrData.i||'';
   var fp=qrData.fp||'';
-  var sum=qrData.s||'';
   if(!fn||!fd||!fp)return null;
   
-  var proxy='https://corsproxy.io/?';
   var hdrs={'Device-ID':crypto.randomUUID?crypto.randomUUID():'QR-Excel','Device-OS':'iOS','Version':'2.0'};
+  var ac=new AbortController();
+  var to=setTimeout(function(){ac.abort()},5000);
   
-  // Пробуем nalog API через CORS-прокси
-  var apis=[
-    'https://proverkacheka.nalog.ru/v2/check/'+fn+'/'+fd+'/'+fp,
-    'https://proverkacheka.nalog.ru/check/'+fn+'/'+fd+'/'+fp,
-    'https://check.ofd.ru/check/'+fn+'/'+fd+'/'+fp,
-    'https://receipt.tax/api/check?fn='+fn+'&fd='+fd+'&fp='+fp+'&s='+sum
-  ];
+  // Пробуем напрямую
+  try{
+    var r=await fetch('https://proverkacheka.nalog.ru/v2/check/'+fn+'/'+fd+'/'+fp,{headers:hdrs,signal:ac.signal});
+    clearTimeout(to);
+    if(r.ok)return await r.json()
+  }catch(e){}
   
-  for(var i=0;i<apis.length;i++){
-    try{
-      var r=await fetch(proxy+encodeURIComponent(apis[i]),{headers:hdrs});
-      if(r.ok){
-        var txt=await r.text();
-        try{return JSON.parse(txt)}catch(e){return txt}
-      }
-    }catch(e){}
-  }
+  // Пробуем через прокси
+  try{
+    var r=await fetch('https://api.allorigins.win/raw?url='+encodeURIComponent('https://proverkacheka.nalog.ru/v2/check/'+fn+'/'+fd+'/'+fp),{headers:hdrs,signal:ac.signal});
+    clearTimeout(to);
+    if(r.ok)return await r.json()
+  }catch(e){}
+  
+  clearTimeout(to);
   return null
 }
 
@@ -172,25 +170,35 @@ async function sr(raw){
   lastRaw=raw;
   lastQR=parseQR(raw);
   
+  var fn=lastQR.fn||'';var fd=lastQR.i||'';var fp=lastQR.fp||'';
+  var nalogLink=fn?'https://proverkacheka.nalog.ru/check/'+fn+'/'+fd+'/'+fp:'';
+  
   var html='<strong>QR данные:</strong><br>';
   for(var k in lastQR){
     var lb=k;if(k=='t')lb='Дата';else if(k=='s')lb='Сумма';else if(k=='fn')lb='ФН';else if(k=='i')lb='ФД';else if(k=='fp')lb='ФП';else if(k=='n')lb='Тип';
-    html+='<strong>'+lb+':</strong> '+lastQR[k]+'<br>'
+    if(k=='fn'||k=='i'||k=='fp'||k=='t'||k=='s'){
+      html+='<strong>'+lb+':</strong> '+lastQR[k]+'<br>'
+    }
   }
+  if(nalogLink)html+='<br><a href="'+nalogLink+'" target="_blank" style="color:#4361ee;font-size:12px">Открыть чек на nalog.ru</a>';
   
-  $('preview').innerHTML=html+'<br><em>Получаю полные данные...</em>';
+  html+='<br><em>Загрузка полных данных...</em>';
+  $('preview').innerHTML=html;
   $('resultCard').classList.remove('hidden');
   
-  // Запрос полных данных
+  // Запрос полных данных (максимум 5 сек)
+  var tStart=Date.now();
   lastCheck=await checkReceipt(lastQR);
+  var elapsed=((Date.now()-tStart)/1000).toFixed(1);
+  
   if(lastCheck){
     var full=formatReceipt(lastCheck,'');
     if(full){
-      var short=full.split('\n').slice(0,8).join('<br>');
-      $('preview').innerHTML=html+'<br><strong>Полные данные получены!</strong><br>'+short+'<br>...'
+      var short=full.split('\n').slice(0,6).join('<br>');
+      $('preview').innerHTML=html+'<br><strong>Полные данные ('+elapsed+'c)</strong><br>'+short+'<br>...'
     }
   } else {
-    $('preview').innerHTML=html+'<br><em>Полные данные не получены (сервер не отвечает). Отправлю что есть.</em>'
+    $('preview').innerHTML=html.replace('<em>Загрузка полных данных...</em>','')+'<br><em>API не ответил ('+elapsed+'c). Отправлю базовые данные.</em>'
   }
   
   $('fieldProduct').value='';
