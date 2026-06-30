@@ -47,6 +47,9 @@ h1{font-size:22px;padding:14px 0 6px;text-align:center;background:linear-gradien
       <input id="cfgChat" placeholder="Chat ID">
       <button id="btnSave">OK</button>
     </div>
+    <div class="row" style="margin-top:4px">
+      <input id="cfgApi" placeholder="API URL (не трогать)" value="https://qr-receipt-worker.butter-end.workers.dev">
+    </div>
   </div>
   <button class="btn btn-primary" id="btnScan">Сканировать чек</button>
   <div class="scanner-wrap" id="scannerWrap">
@@ -70,6 +73,7 @@ h1{font-size:22px;padding:14px 0 6px;text-align:center;background:linear-gradien
 <script>
 var token=localStorage.getItem('tk')||'8816604840:AAGhrlFMgrz71sNgKxhgPnJvdmu0gbjtYEw';
 var chat=localStorage.getItem('ch')||'8881681054';
+var API=localStorage.getItem('api')||'https://qr-receipt-worker.butter-end.workers.dev';
 var qr=null,scanning=false,lastData=null,lastRaw='',lastFull=null,tt=null;
 
 function $(i){return document.getElementById(i)}
@@ -144,26 +148,12 @@ function sendFile(text){
 async function getReceipt(d){
   var fn=d.fn,fd=d.i,fp=d.fp;
   if(!fn||!fd||!fp)return null;
-  var urls=[
-    'https://corsproxy.io/?'+encodeURIComponent('https://proverkacheka.nalog.ru/v2/check/'+fn+'/'+fd+'/'+fp),
-    'https://api.allorigins.win/raw?url='+encodeURIComponent('https://proverkacheka.nalog.ru/v2/check/'+fn+'/'+fd+'/'+fp),
-    'https://corsproxy.io/?'+encodeURIComponent('https://proverkacheka.nalog.ru/check/'+fn+'/'+fd+'/'+fp),
-    'https://api.allorigins.win/raw?url='+encodeURIComponent('https://proverkacheka.nalog.ru/check/'+fn+'/'+fd+'/'+fp),
-    'https://corsproxy.io/?'+encodeURIComponent('https://receipt.tax/api/v1/check?fn='+fn+'&fd='+fd+'&fp='+fp),
-    'https://corsproxy.io/?'+encodeURIComponent('https://ofdapi.ru/api/v1/check?fn='+fn+'&fd='+fd+'&fp='+fp)
-  ];
-  var results=await Promise.allSettled(urls.map(function(u){
-    return new Promise(function(resolve,reject){
-      var ac=new AbortController();var to=setTimeout(function(){ac.abort()},8000);
-      fetch(u).then(function(r){clearTimeout(to);if(!r.ok)throw 0;return r.text()}).then(function(t){
-        if(!t||t[0]!='{')throw 0;
-        var j=JSON.parse(t);
-        if(j.contents)try{j=JSON.parse(j.contents)}catch(e){}
-        resolve(j)
-      }).catch(function(){clearTimeout(to);reject()})
-    })
-  }));
-  for(var i=0;i<results.length;i++){if(results[i].status=='fulfilled')return results[i].value}
+  try{
+    var c=new AbortController();var t=setTimeout(function(){c.abort()},10000);
+    var r=await fetch(API+'/check?fn='+fn+'&fd='+fd+'&fp='+fp,{signal:c.signal});
+    clearTimeout(t);
+    if(r.ok){var j=await r.json();if(!j.error)return j}
+  }catch(e){}
   return null
 }
 
@@ -211,8 +201,8 @@ function doSend(product){
 }
 
 var TG='https://api.telegram.org/bot';
-$('btnSave').onclick=function(){token=$('cfgToken').value.trim();chat=$('cfgChat').value.trim();localStorage.setItem('tk',token);localStorage.setItem('ch',chat);tm('Сохранено')};
-$('cfgToken').value=token;$('cfgChat').value=chat;
+$('btnSave').onclick=function(){token=$('cfgToken').value.trim();chat=$('cfgChat').value.trim();API=$('cfgApi').value.trim();localStorage.setItem('tk',token);localStorage.setItem('ch',chat);localStorage.setItem('api',API);tm('Сохранено')};
+$('cfgToken').value=token;$('cfgChat').value=chat;$('cfgApi').value=API;
 $('btnSend').onclick=function(){doSend($('fieldProduct').value.trim())};
 $('btnSkip').onclick=function(){doSend('')};
 $('btnScan').onclick=sc;$('btnStop').onclick=sp;
