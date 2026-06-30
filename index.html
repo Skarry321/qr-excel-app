@@ -84,7 +84,7 @@ async function getFullReceipt(qrData,rawText){
   // Если QR это URL - пробуем открыть его напрямую
   if(rawText&&(rawText.startsWith('http://')||rawText.startsWith('https://'))){
     try{
-      var r=await fetch(rawText,{signal:AbortSignal.timeout(5000)});
+      var ac2=new AbortController();var to2=setTimeout(function(){ac2.abort()},5000);var r=await fetch(rawText,{signal:ac2.signal});clearTimeout(to2);
       if(r.ok){
         var txt=await r.text();
         var m=txt.match(/{[^]+?"totalSum"[^]+?}/);
@@ -201,7 +201,7 @@ async function sr(raw){
   h+='<br><em>Запрос полных данных...</em>';
   $('preview').innerHTML=h;$('resultCard').classList.remove('hidden');
   
-  lastFull=await getFullReceipt(lastData);
+  lastFull=await getFullReceipt(lastData,lastRaw);
   if(lastFull){
     var f=formatFull(lastFull,'');
     if(f){
