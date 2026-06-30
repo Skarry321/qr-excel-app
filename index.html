@@ -10,7 +10,6 @@
 <meta name="theme-color" content="#4361ee">
 <title>QR → Excel</title>
 <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
-<script src="https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;background:#f2f2f7;color:#1c1c1e;padding:0 16px 24px;max-width:480px;margin:0 auto}
@@ -41,21 +40,16 @@ th{font-size:10px;color:#8e8e93;background:#fafafa}
 .toast{position:fixed;bottom:30px;left:50%;transform:translateX(-50%);background:#1c1c1e;color:#fff;padding:12px 24px;border-radius:12px;font-size:14px;z-index:999;opacity:0;transition:opacity .25s;pointer-events:none}
 .toast.show{opacity:1}
 .del-btn{padding:4px 8px;border:none;border-radius:6px;background:#ff3b30;color:#fff;cursor:pointer;font-size:11px;font-weight:600}
-.guide{background:#fef3c7;border:1px solid #fde68a;border-radius:12px;padding:12px;margin-bottom:8px;font-size:12px;line-height:1.6;color:#92400e}
-.guide strong{color:#4361ee}
+.conn-info{text-align:center;font-size:12px;padding:6px;border-radius:8px;margin-bottom:6px}
+.conn-info.ok{background:#d1fae5;color:#065f46}
+.conn-info.fail{background:#fee2e2;color:#991b1b}
 </style>
 </head>
 <body>
 
 <h1>QR → Excel</h1>
 
-<div class="guide">
-<strong>Как перенести на ПК:</strong><br>
-1. Сканируйте чеки ниже<br>
-2. Нажмите <strong>«Скачать .xlsx»</strong><br>
-3. Подключите телефон к ПК кабелем (режим «Передача файлов»)<br>
-4. Скопируйте файл с телефона на ПК и откройте в Excel
-</div>
+<div class="conn-info ok" id="tgStatus">Telegram: OK</div>
 
 <div class="card">
   <button class="btn btn-primary" id="btnScan">Сканировать чек</button>
@@ -70,7 +64,7 @@ th{font-size:10px;color:#8e8e93;background:#fafafa}
   <div class="preview" id="preview"></div>
   <label style="font-size:13px;color:#8e8e93;margin:6px 0 3px">Наименование товара</label>
   <input class="field" id="fieldProduct" placeholder="Например: Молоко..." autocomplete="off">
-  <button class="btn btn-success" id="btnSave">Сохранить</button>
+  <button class="btn btn-success" id="btnSave">Сохранить и отправить</button>
   <button class="btn btn-gray" id="btnSkip">Без названия</button>
   <button class="btn btn-gray" id="btnCancel">Отмена</button>
 </div>
@@ -82,7 +76,7 @@ th{font-size:10px;color:#8e8e93;background:#fafafa}
     <div class="empty" id="emptyMsg">Нет записей</div>
   </div>
   <div id="actions" class="hidden" style="margin-top:8px">
-    <button class="btn btn-success" id="btnDL">Скачать .xlsx на телефон</button>
+    <button class="btn btn-success" id="btnSendAll">Отправить все в Telegram</button>
     <button class="btn btn-danger" id="btnClear">Очистить</button>
   </div>
 </div>
@@ -90,12 +84,44 @@ th{font-size:10px;color:#8e8e93;background:#fafafa}
 <div class="toast" id="toast"></div>
 
 <script>
+var TG='https://api.telegram.org/bot8816604840:AAGhrlFMgrz71sNgKxhgPnJvdmu0gbjtYEw';
+var CHAT='8881681054';
 var entries=JSON.parse(localStorage.getItem('q')||'[]');
 var qr=null,scanning=false,lastData=null,tt=null;
+
 function $(i){return document.getElementById(i)}
 function tm(m,e){clearTimeout(tt);var t=$('toast');t.textContent=m;t.style.background=e?'#ff3b30':'#1c1c1e';t.classList.add('show');tt=setTimeout(function(){t.classList.remove('show')},2500)}
 function pr(t){var d={date:'',sum:'',num:''};try{var p=t.startsWith('http')?new URL(t).searchParams:new URLSearchParams(t);d.num=p.get('i')||p.get('fd')||'';d.sum=p.get('s')||'';var v=p.get('t')||'';if(v){var m=v.match(/^(\d{4})(\d{2})(\d{2})/);if(m)d.date=m[3]+'.'+m[2]+'.'+m[1]}}catch(e){}return d}
-function xl(){var wb=XLSX.utils.book_new();var d=[['N','Дата','Наименование','Сумма']];entries.forEach(function(e,i){d.push([i+1,e.date||'',e.product||'',e.sum||''])});var ws=XLSX.utils.aoa_to_sheet(d);ws['!cols']=[{w:5},{w:14},{w:30},{w:12}];XLSX.utils.book_append_sheet(wb,ws,'Чеки');var out=XLSX.write(wb,{bookType:'xlsx',type:'array'});var b=new Blob([out],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});var u=URL.createObjectURL(b);var a=document.createElement('a');a.href=u;a.download='cheki.xlsx';document.body.appendChild(a);a.click();document.body.removeChild(a);URL.revokeObjectURL(u)}
+
+async function tgSend(msg){
+  try{
+    var r=await fetch(TG+'/sendMessage',{
+      method:'POST',
+      headers:{'Content-Type':'application/x-www-form-urlencoded'},
+      body:'chat_id='+CHAT+'&text='+encodeURIComponent(msg)
+    });
+    return (await r.json()).ok
+  }catch(e){return false}
+}
+
+function formatEntry(e,i){
+  return (i+1)+'. '+('  '+(i+1)).slice(-3)+' | '+(e.date||'--')+' | '+(e.product||'--')+' | '+(e.sum||'0')+' р.'
+}
+
+function formatAll(){
+  var s='';
+  s+='📄 ЧЕКИ\n';
+  s+='═══════════════════════════════\n';
+  s+='  N  | Дата       | Товар                | Сумма\n';
+  s+='─────┼────────────┼──────────────────────┼────────\n';
+  entries.forEach(function(e,i){
+    s+=(i+1+'').padStart(3)+'. '+(e.date||'--')+' '+(e.product||'--').padEnd(20)+' '+(e.sum||'0')+'\n';
+  });
+  s+='═══════════════════════════════\n';
+  var total=0;entries.forEach(function(e){total+=parseFloat(e.sum)||0});
+  s+='ИТОГО: '+total.toFixed(2)+' р.\n';
+  return s
+}
 
 async function sc(){
   if(scanning)return;
@@ -111,8 +137,17 @@ async function sc(){
 function sp(){if(qr){try{qr.stop();qr.clear()}catch(e){}qr=null}scanning=false;$('scannerWrap').classList.remove('active')}
 function sr(r){lastData=pr(r);$('preview').innerHTML='<strong>Дата:</strong> '+(lastData.date||'—')+'<br><strong>Сумма:</strong> '+(lastData.sum||'—')+'<br><strong>Номер:</strong> '+(lastData.num||'—');$('fieldProduct').value='';$('resultCard').classList.remove('hidden');setTimeout(function(){$('fieldProduct').focus()},300)}
 function ad(p){if(!lastData)return null;var e={date:lastData.date,sum:lastData.sum,number:lastData.num,product:p||''};entries.push(e);localStorage.setItem('q',JSON.stringify(entries));rt();return e}
-$('btnSave').onclick=function(){if(ad($('fieldProduct').value.trim())){tm('Сохранено');$('resultCard').classList.add('hidden');lastData=null}};
-$('btnSkip').onclick=function(){if(ad('')){tm('Сохранено');$('resultCard').classList.add('hidden');lastData=null}};
+
+async function doSend(product){
+  var e=ad(product);if(!e)return;
+  var msg=formatEntry(e,entries.length-1);
+  var ok=await tgSend(msg);
+  if(ok){tm('Отправлено в Telegram')}else{tm('Ошибка отправки',1)}
+  $('resultCard').classList.add('hidden');lastData=null
+}
+
+$('btnSave').onclick=function(){doSend($('fieldProduct').value.trim())};
+$('btnSkip').onclick=function(){doSend('')};
 $('btnCancel').onclick=function(){$('resultCard').classList.add('hidden');lastData=null};
 $('btnScan').onclick=sc;$('btnStop').onclick=sp;
 
@@ -131,9 +166,13 @@ function rt(){
   })
 }
 
-$('btnDL').onclick=function(){
+$('btnSendAll').onclick=async function(){
   if(!entries.length){tm('Нет записей',1);return}
-  xl();tm('Файл cheki.xlsx скачан на телефон')
+  var btn=this;btn.disabled=true;btn.innerHTML='Отправка...';
+  var msg=formatAll();
+  var ok=await tgSend(msg);
+  if(ok){tm('Все чеки отправлены в Telegram')}else{tm('Ошибка отправки',1)}
+  btn.disabled=false;btn.innerHTML='Отправить все в Telegram'
 };
 
 $('btnClear').onclick=function(){if(!confirm('Удалить всё?'))return;entries=[];localStorage.setItem('q','[]');rt();tm('Очищено')};
