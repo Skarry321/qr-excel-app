@@ -75,26 +75,55 @@ async function fetchWithProxy(url,hdrs,timeout){
   }catch(e){}clearTimeout(to);return null
 }
 
-async function getFullReceipt(qrData){
+function makeID(){return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,function(c){var r=Math.random()*16|0;return(c=='x'?r:(r&0x3|0x8)).toString(16)})}
+
+async function getFullReceipt(qrData,rawText){
   var fn=qrData.fn||'',fd=qrData.i||'',fp=qrData.fp||'';
-  if(!fn||!fd||!fp)return null;
-  var hdrs={'Device-ID':crypto.randomUUID(),'Device-OS':'iOS','Version':'2.0','Accept':'application/json'};
+  var sum=qrData.s||'',tVal=qrData.t||'';
   
-  // Пробуем напрямую + прокси параллельно
-  var results=await Promise.allSettled([
-    fetchWithProxy('https://proverkacheka.nalog.ru/v2/check/'+fn+'/'+fd+'/'+fp,hdrs,6000),
-    fetchWithProxy('https://proverkacheka.nalog.ru/check/'+fn+'/'+fd+'/'+fp,hdrs,6000),
-    fetchWithProxy('https://api.allorigins.win/raw?url='+encodeURIComponent('https://proverkacheka.nalog.ru/v2/check/'+fn+'/'+fd+'/'+fp),hdrs,6000),
-    fetchWithProxy('https://corsproxy.io/?'+encodeURIComponent('https://proverkacheka.nalog.ru/v2/check/'+fn+'/'+fd+'/'+fp),hdrs,6000),
-    fetchWithProxy('https://receipt.tax/api/v1/check?fn='+fn+'&fd='+fd+'&fp='+fp,{},6000)
-  ]);
+  // Если QR это URL - пробуем открыть его напрямую
+  if(rawText&&(rawText.startsWith('http://')||rawText.startsWith('https://'))){
+    try{
+      var r=await fetch(rawText,{signal:AbortSignal.timeout(5000)});
+      if(r.ok){
+        var txt=await r.text();
+        var m=txt.match(/{[^]+?"totalSum"[^]+?}/);
+        if(m)try{return JSON.parse(m[0])}catch(e){}
+      }
+    }catch(e){}
+  }
+  
+  if(!fn||!fd||!fp)return null;
+  
+  var id=makeID();
+  var hdrs={'Device-ID':id,'Device-OS':'iPhone 14','Version':'2.0','Accept':'application/json, text/plain, */*'};
+  var dateParam=tVal?tVal.replace(/T.*/,''):'';
+  var sumParam=sum?'&s='+sum:'';
+  
+  var attempts=[
+    {url:'https://proverkacheka.nalog.ru/v2/check/'+fn+'/'+fd+'/'+fp,proxy:''},
+    {url:'https://proverkacheka.nalog.ru/check/'+fn+'/'+fd+'/'+fp,proxy:''},
+    {url:'https://proverkacheka.nalog.ru/v2/check/'+fn+'/'+fd+'/'+fp+'?fiscalSign='+fp+'&sum='+sum+sumParam,proxy:''},
+    {url:'https://api.allorigins.win/raw?url='+encodeURIComponent('https://proverkacheka.nalog.ru/v2/check/'+fn+'/'+fd+'/'+fp),proxy:''},
+    {url:'https://corsproxy.io/?'+encodeURIComponent('https://proverkacheka.nalog.ru/v2/check/'+fn+'/'+fd+'/'+fp),proxy:''},
+    {url:'https://receipt.tax/api/v1/check?fn='+fn+'&fd='+fd+'&fp='+fp+sumParam,proxy:''},
+    {url:'https://ofdapi.ru/check?fn='+fn+'&fd='+fd+'&fp='+fp+sumParam,proxy:''}
+  ];
+  
+  var results=await Promise.allSettled(attempts.map(function(a){
+    return fetchWithProxy(a.proxy+encodeURIComponent(a.url),hdrs,7000)
+  }));
   
   for(var i=0;i<results.length;i++){
     if(results[i].status=='fulfilled'&&results[i].value){
-      try{return JSON.parse(results[i].value)}catch(e){
-        var m=results[i].value.match(/{[^]+?totalSum[^]+?}/);
-        if(m)try{return JSON.parse(m[0])}catch(e2){}
+      var v=results[i].value;
+      if(v.startsWith('{')||v.startsWith('[')){
+        try{return JSON.parse(v)}catch(e){}
       }
+      var m=v.match(/{[^]+?"totalSum"[^]+?}/);
+      if(m)try{return JSON.parse(m[0])}catch(e){}
+      m=v.match(/{[^]+?"items"[^]+?}/);
+      if(m)try{return JSON.parse(m[0])}catch(e){}
     }
   }
   return null
