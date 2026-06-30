@@ -44,9 +44,9 @@ h1{font-size:22px;padding:14px 0 6px;text-align:center;background:linear-gradien
 <div class="card">
   <div class="cfg">
     <div class="row">
-      <input id="cfgToken" placeholder="Token бота">
+      <input id="cfgToken" placeholder="Token">
       <input id="cfgChat" placeholder="Chat ID">
-      <button id="btnSave">Save</button>
+      <button id="btnSave">OK</button>
     </div>
   </div>
   <button class="btn btn-primary" id="btnScan">Сканировать чек</button>
@@ -61,11 +61,13 @@ h1{font-size:22px;padding:14px 0 6px;text-align:center;background:linear-gradien
   <div class="preview" id="preview"></div>
   <label style="font-size:13px;color:#8e8e93;margin:6px 0 3px">Наименование товара</label>
   <input class="field" id="fieldProduct" placeholder="Например: Молоко..." autocomplete="off">
-  <button class="btn btn-success" id="btnSend">Отправить в Telegram</button>
+  <button class="btn btn-success" id="btnSend">Отправить</button>
   <button class="btn btn-gray" id="btnSkip">Без названия</button>
 </div>
 
 <div class="toast" id="toast"></div>
+
+<iframe name="tgFrame" id="tgFrame" style="display:none"></iframe>
 
 <script>
 var token=localStorage.getItem('tk')||'8816604840:AAGhrlFMgrz71sNgKxhgPnJvdmu0gbjtYEw';
@@ -75,35 +77,22 @@ var qr=null,scanning=false,lastData=null,tt=null;
 function $(i){return document.getElementById(i)}
 function tm(m,e){clearTimeout(tt);var t=$('toast');t.textContent=m;t.style.background=e?'#ff3b30':'#1c1c1e';t.classList.add('show');tt=setTimeout(function(){t.classList.remove('show')},2500)}
 
-function pr(t){
-  var d={};
-  try{
-    var p=t.startsWith('http')?new URL(t).searchParams:new URLSearchParams(t);
-    for(var k of p.keys())d[k]=p.get(k)
-  }catch(e){}
-  return d
-}
+function pr(t){var d={};try{var p=t.startsWith('http')?new URL(t).searchParams:new URLSearchParams(t);for(var k of p.keys())d[k]=p.get(k)}catch(e){}return d}
 
-function label(k){
-  var m={'t':'Дата','s':'Сумма','fn':'ФН','i':'ФД','fp':'ФП','n':'Тип'};
-  return m[k]||k
-}
+function label(k){var m={'t':'Дата','s':'Сумма','fn':'ФН','i':'ФД','fp':'ФП','n':'Тип'};return m[k]||k}
 
 function fmtAllQR(d){
-  var s='ЧЕК ИЗ QR\n';
-  s+='========================\n';
+  var s='ЧЕК ИЗ QR\n========================\n';
   for(var k in d)s+=label(k)+': '+d[k]+'\n';
   return s
 }
 
 function fmtReceipt(r){
-  if(!r)return '';
+  if(!r)return'';
   if(r.document&&r.document.receipt)r=r.document.receipt;
   if(r.receipt)r=r.receipt;
-  if(!r.totalSum&&!r.items)return '';
-
-  var s='ПОЛНЫЙ ЧЕК\n';
-  s+='========================\n';
+  if(!r.totalSum&&!r.items)return'';
+  var s='\nПОЛНЫЙ ЧЕК\n========================\n';
   if(r.user)s+='Продавец: '+r.user+'\n';
   if(r.userInn)s+='ИНН: '+r.userInn+'\n';
   if(r.dateTime)s+='Дата: '+String(r.dateTime).replace('T',' ').slice(0,16)+'\n';
@@ -115,9 +104,9 @@ function fmtReceipt(r){
   if(r.items){
     s+='========================\nТОВАРЫ:\n';
     r.items.forEach(function(it,i){
-      var price=it.price?(it.price/100).toFixed(2):'0';
-      var sum=it.sum?(it.sum/100).toFixed(2):'0';
-      s+=(i+1)+'. '+it.name+' - '+price+' x '+it.quantity+' = '+sum+'\n';
+      var p=it.price?(it.price/100).toFixed(2):'0';
+      var sm=it.sum?(it.sum/100).toFixed(2):'0';
+      s+=(i+1)+'. '+it.name+' '+p+' x '+it.quantity+' = '+sm+'\n';
     })
   }
   s+='========================\n';
@@ -133,17 +122,40 @@ function fmtReceipt(r){
   return s
 }
 
+function sendTG(text){
+  var form=document.createElement('form');
+  form.action=TG+'/sendMessage';
+  form.method='POST';
+  form.target='tgFrame';
+  var ci=document.createElement('input');ci.name='chat_id';ci.value=chat;form.appendChild(ci);
+  var ti=document.createElement('input');ti.name='text';ti.value=text;form.appendChild(ti);
+  document.body.appendChild(form);form.submit();document.body.removeChild(form)
+}
+
+function sendFile(text){
+  var form=document.createElement('form');
+  form.action=TG+'/sendDocument';
+  form.method='POST';
+  form.target='tgFrame';
+  form.enctype='multipart/form-data';
+  var ci=document.createElement('input');ci.name='chat_id';ci.value=chat;form.appendChild(ci);
+  var fi=document.createElement('input');fi.type='file';fi.name='document';fi.id='fileInput';
+  var blob=new Blob([text],{type:'text/plain;charset=utf-8'});
+  var dt=new DataTransfer();dt.items.add(new File([blob],'chek.txt',{type:'text/plain'}));
+  fi.files=dt.files;
+  form.appendChild(fi);
+  document.body.appendChild(form);form.submit();document.body.removeChild(form)
+}
+
 async function getReceipt(d){
   var fn=d.fn,fd=d.i,fp=d.fp;
   if(!fn||!fd||!fp)return null;
-
   var urls=[
     'https://corsproxy.io/?'+encodeURIComponent('https://proverkacheka.nalog.ru/v2/check/'+fn+'/'+fd+'/'+fp),
     'https://api.allorigins.win/raw?url='+encodeURIComponent('https://proverkacheka.nalog.ru/v2/check/'+fn+'/'+fd+'/'+fp),
     'https://corsproxy.io/?'+encodeURIComponent('https://proverkacheka.nalog.ru/check/'+fn+'/'+fd+'/'+fp),
     'https://api.allorigins.win/raw?url='+encodeURIComponent('https://proverkacheka.nalog.ru/check/'+fn+'/'+fd+'/'+fp)
   ];
-
   var results=await Promise.allSettled(urls.map(function(u){
     return new Promise(function(resolve,reject){
       var ac=new AbortController();var to=setTimeout(function(){ac.abort()},6000);
@@ -155,10 +167,7 @@ async function getReceipt(d){
       }).catch(function(){clearTimeout(to);reject()})
     })
   }));
-
-  for(var i=0;i<results.length;i++){
-    if(results[i].status=='fulfilled')return results[i].value
-  }
+  for(var i=0;i<results.length;i++){if(results[i].status=='fulfilled')return results[i].value}
   return null
 }
 
@@ -179,65 +188,36 @@ async function sr(raw){
   lastData=pr(raw);
   var h=fmtAllQR(lastData);
   if(lastData.fn)h+='\nЧек: https://proverkacheka.nalog.ru/check/'+lastData.fn+'/'+lastData.i+'/'+lastData.fp+'\n';
-  h+='Загрузка...';
+  h+='Загрузка полных данных...';
   $('preview').innerHTML=h;
   $('resultCard').classList.remove('hidden');
 
   try{
     var full=await getReceipt(lastData);
-    if(full){
-      var ff=fmtReceipt(full);
-      if(ff)h=h.replace('Загрузка...','')+'\n'+ff
-    }else{h=h.replace('Загрузка...','')}
-  }catch(e){h=h.replace('Загрузка...','')}
+    if(full){var ff=fmtReceipt(full);if(ff)h=h.replace('Загрузка полных данных...','')+'\n'+ff}
+    else{h=h.replace('Загрузка полных данных...','')}
+  }catch(e){h=h.replace('Загрузка полных данных...','')}
 
   $('preview').innerHTML=h;
   $('fieldProduct').value='';
   setTimeout(function(){$('fieldProduct').focus()},300)
 }
 
-var TG='https://api.telegram.org/bot';
-
-async function doSend(product){
+function doSend(product){
   if(!lastData)return;
-  var btn=$('btnSend');btn.disabled=true;btn.innerHTML='Отправка...';
-
   var msg=fmtAllQR(lastData);
   if(product)msg='Товар: '+product+'\n\n'+msg;
-
-  // Пытаемся получить полные данные
-  var full=null;
-  try{full=await getReceipt(lastData)}catch(e){}
-
-  if(full){
-    var ff=fmtReceipt(full);
-    if(ff)msg+='\n'+ff
-  }
-
   if(lastData.fn)msg+='\nПолный чек: https://proverkacheka.nalog.ru/check/'+lastData.fn+'/'+lastData.i+'/'+lastData.fp;
 
-  // Отправляем
-  try{
-    var r=await fetch(TG+token+'/sendMessage',{
-      method:'POST',
-      headers:{'Content-Type':'application/x-www-form-urlencoded'},
-      body:'chat_id='+chat+'&text='+encodeURIComponent(msg)
-    });
-    var j=await r.json();
-    if(!j.ok){tm('Ошибка: '+j.description,1);btn.disabled=false;btn.innerHTML='Отправить';return}
+  sendTG(msg);
 
-    // .txt файл
-    try{
-      var fd=new FormData();fd.append('chat_id',chat);
-      fd.append('document',new Blob([msg],{type:'text/plain;charset=utf-8'}),'chek.txt');
-      await fetch(TG+token+'/sendDocument',{method:'POST',body:fd,mode:'no-cors'})
-    }catch(e){}
+  // Пытаемся отправить .txt файл через 1 секунду
+  setTimeout(function(){
+    try{sendFile(msg)}catch(e){}
+  },1000);
 
-    tm('Отправлено!');
-    $('resultCard').classList.add('hidden');lastData=null
-  }catch(e){tm('Нет интернета',1)}
-
-  btn.disabled=false;btn.innerHTML='Отправить'
+  tm('Отправлено!');
+  $('resultCard').classList.add('hidden');lastData=null
 }
 
 $('btnSave').onclick=function(){token=$('cfgToken').value.trim();chat=$('cfgChat').value.trim();localStorage.setItem('tk',token);localStorage.setItem('ch',chat);tm('Сохранено')};
