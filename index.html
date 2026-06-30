@@ -26,16 +26,13 @@ h1{font-size:24px;padding:16px 0 2px;text-align:center;background:linear-gradien
 #reader__dashboard_section{display:none}
 .field{width:100%;padding:12px;border:2px solid #e5e5ea;border-radius:12px;font-size:15px;outline:none;margin:4px 0;background:#f9f9f9}
 .field:focus{border-color:#4361ee}
-.preview{background:#f2f2f7;border-radius:12px;padding:10px;margin:4px 0;font-size:13px;line-height:1.7}
+.preview{background:#f2f2f7;border-radius:12px;padding:10px;margin:4px 0;font-size:12px;line-height:1.6;word-break:break-all}
 .preview strong{color:#4361ee}
 .hidden{display:none!important}
 .toast{position:fixed;bottom:30px;left:50%;transform:translateX(-50%);background:#1c1c1e;color:#fff;padding:12px 24px;border-radius:12px;font-size:14px;z-index:999;opacity:0;transition:.25s;pointer-events:none}
 .toast.show{opacity:1}
 .status{text-align:center;font-size:13px;padding:6px 0;color:#8e8e93}
 .s-label{font-size:12px;font-weight:600;color:#8e8e93;margin:6px 0 2px;display:block}
-.s-row{display:flex;gap:6px;align-items:flex-end}
-.s-row .field{flex:1}
-.s-row .btn{width:auto;padding:12px 16px;margin:0;flex-shrink:0}
 .setup-bar{background:#f0f7ff;border:1px solid #bddbff;border-radius:10px;padding:10px 12px;margin-bottom:8px;font-size:12px;color:#1a404e;line-height:1.6}
 .setup-bar .row{display:flex;gap:4px;align-items:center}
 .setup-bar .row input{flex:1;padding:6px 8px;border:1px solid #bddbff;border-radius:6px;font-size:12px;outline:none}
@@ -47,11 +44,10 @@ h1{font-size:24px;padding:16px 0 2px;text-align:center;background:linear-gradien
 <h1>QR → Excel</h1>
 
 <div class="setup-bar">
-  <div>Token и Chat ID сохраняются автоматически</div>
-  <div class="row" style="margin-top:4px">
-    <input id="cfgToken" placeholder="Token бота" value="8816604840:AAGhrlFMgrz71sNgKxhgPnJvdmu0gbjtYEw">
+  <div class="row">
+    <input id="cfgToken" placeholder="Token" value="8816604840:AAGhrlFMgrz71sNgKxhgPnJvdmu0gbjtYEw">
     <input id="cfgChat" placeholder="Chat ID" value="8881681054">
-    <button id="btnSave">Сохранить</button>
+    <button id="btnSave">Save</button>
   </div>
 </div>
 
@@ -75,23 +71,78 @@ h1{font-size:24px;padding:16px 0 2px;text-align:center;background:linear-gradien
 <div class="toast" id="toast"></div>
 
 <script>
-var token=localStorage.getItem('tg_token')||'8816604840:AAGhrlFMgrz71sNgKxhgPnJvdmu0gbjtYEw';
-var chat=localStorage.getItem('tg_chat')||'8881681054';
-var qr=null,scanning=false,lastData=null,tt=null;
+var token=localStorage.getItem('tk')||'8816604840:AAGhrlFMgrz71sNgKxhgPnJvdmu0gbjtYEw';
+var chat=localStorage.getItem('ch')||'8881681054';
+var qr=null,scanning=false,lastData=null,lastRaw='',tt=null;
 
 function $(i){return document.getElementById(i)}
 function tm(m,e){clearTimeout(tt);var t=$('toast');t.textContent=m;t.style.background=e?'#ff3b30':'#1c1c1e';t.classList.add('show');tt=setTimeout(function(){t.classList.remove('show')},2500)}
-function pr(t){var d={date:'',sum:'',num:''};try{var p=t.startsWith('http')?new URL(t).searchParams:new URLSearchParams(t);d.num=p.get('i')||p.get('fd')||'';d.sum=p.get('s')||'';var v=p.get('t')||'';if(v){var m=v.match(/^(\d{4})(\d{2})(\d{2})/);if(m)d.date=m[3]+'.'+m[2]+'.'+m[1]}}catch(e){}return d}
 
-function loadCfg(){
-  $('cfgToken').value=token;$('cfgChat').value=chat
+function parseAll(t){
+  var d={};
+  try{
+    var p=t.startsWith('http')?new URL(t).searchParams:new URLSearchParams(t);
+    for(var k of p.keys()){d[k]=p.get(k)}
+  }catch(e){}
+  return d
 }
 
-$('btnSave').onclick=function(){
-  token=$('cfgToken').value.trim();chat=$('cfgChat').value.trim();
-  localStorage.setItem('tg_token',token);localStorage.setItem('tg_chat',chat);
-  tm('Сохранено')
-};
+function fmtPreview(data){
+  var s='';
+  for(var k in data){
+    var label=k;
+    if(k=='t')label='Дата/время';
+    else if(k=='s')label='Сумма';
+    else if(k=='fn')label='ФН';
+    else if(k=='i')label='ФД';
+    else if(k=='fp')label='ФП';
+    else if(k=='n')label='Тип';
+    s+='<strong>'+label+':</strong> '+data[k]+'<br>'
+  }
+  return s
+}
+
+function fmtTxt(data,product){
+  var s='=== ЧЕК ===\n';
+  s+='Товар: '+(product||'—')+'\n';
+  for(var k in data){
+    var label=k;
+    if(k=='t')label='Дата/время';
+    else if(k=='s')label='Сумма';
+    else if(k=='fn')label='ФН';
+    else if(k=='i')label='ФД';
+    else if(k=='fp')label='ФП';
+    else if(k=='n')label='Тип';
+    s+=label+': '+data[k]+'\n'
+  }
+  s+='\nСырой QR: '+lastRaw;
+  return s
+}
+
+function fmtMsg(data,product){
+  var s='📄 *ЧЕК*\n';
+  s+='📦 Товар: '+(product||'—')+'\n';
+  for(var k in data){
+    var emoji='•';
+    if(k=='t')emoji='📅';
+    else if(k=='s')emoji='💰';
+    else if(k=='fn')emoji='🔢';
+    else if(k=='i')emoji='📄';
+    else if(k=='fp')emoji='✅';
+    else if(k=='n')emoji='🏷';
+    s+=emoji+' '+k+': '+data[k]+'\n'
+  }
+  return s
+}
+
+async function sendToPastebin(text){
+  try{
+    var r=await fetch('https://clbin.com',{method:'POST',body:text});
+    var url=await r.text();
+    if(url&&url.startsWith('http'))return url.trim()
+  }catch(e){}
+  return null
+}
 
 async function sc(){
   if(scanning)return;
@@ -105,27 +156,46 @@ async function sc(){
   }catch(e){$('scanStatus').textContent='Ошибка: '+e.message;setTimeout(function(){$('scannerWrap').classList.remove('active')},2000)}
 }
 function sp(){if(qr){try{qr.stop();qr.clear()}catch(e){}qr=null}scanning=false;$('scannerWrap').classList.remove('active')}
-function sr(r){lastData=pr(r);$('preview').innerHTML='<strong>Дата:</strong> '+(lastData.date||'—')+'<br><strong>Сумма:</strong> '+(lastData.sum||'—')+'<br><strong>Номер:</strong> '+(lastData.num||'—');$('fieldProduct').value='';$('resultCard').classList.remove('hidden');setTimeout(function(){$('fieldProduct').focus()},300)}
+function sr(r){lastRaw=r;lastData=parseAll(r);$('preview').innerHTML=fmtPreview(lastData);$('fieldProduct').value='';$('resultCard').classList.remove('hidden');setTimeout(function(){$('fieldProduct').focus()},300)}
 
 async function doSend(product){
   if(!lastData)return;
-  var msg='📄 Чек\nДата: '+(lastData.date||'—')+'\nТовар: '+(product||'—')+'\nСумма: '+(lastData.sum||'—')+'\nНомер: '+(lastData.num||'—');
+  var msg=fmtMsg(lastData,product);
+  var txt=fmtTxt(lastData,product);
   try{
     var r=await fetch('https://api.telegram.org/bot'+token+'/sendMessage',{
       method:'POST',
       headers:{'Content-Type':'application/x-www-form-urlencoded'},
-      body:'chat_id='+chat+'&text='+encodeURIComponent(msg)
+      body:'chat_id='+chat+'&text='+encodeURIComponent(msg)+'&parse_mode=Markdown'
     });
     var j=await r.json();
-    if(j.ok){tm('Отправлено!');$('resultCard').classList.add('hidden');lastData=null}
-    else{tm('Ошибка: '+(j.description||'?'),1)}
+    if(!j.ok){tm('Ошибка: '+(j.description||'?'),1);return}
+    
+    // Отправляем .txt файл
+    var pasteUrl=await sendToPastebin(txt);
+    if(pasteUrl){
+      var r2=await fetch('https://api.telegram.org/bot'+token+'/sendDocument',{
+        method:'POST',
+        headers:{'Content-Type':'application/x-www-form-urlencoded'},
+        body:'chat_id='+chat+'&document='+encodeURIComponent(pasteUrl)+'&caption=chek.txt'
+      });
+      var j2=await r2.json();
+    }
+    
+    tm('Отправлено!');
+    $('resultCard').classList.add('hidden');lastData=null
   }catch(e){tm('Нет интернета',1)}
 }
 
+$('btnSave').onclick=function(){
+  token=$('cfgToken').value.trim();chat=$('cfgChat').value.trim();
+  localStorage.setItem('tk',token);localStorage.setItem('ch',chat);
+  tm('Сохранено')
+};
 $('btnSend').onclick=function(){doSend($('fieldProduct').value.trim())};
 $('btnSkip').onclick=function(){doSend('')};
 $('btnScan').onclick=sc;$('btnStop').onclick=sp;
-loadCfg();
+$('cfgToken').value=token;$('cfgChat').value=chat;
 </script>
 </body>
 </html>
