@@ -26,7 +26,6 @@ h1{font-size:22px;padding:14px 0 6px;text-align:center;background:linear-gradien
 #reader__dashboard_section{display:none}
 .field{width:100%;padding:12px;border:2px solid #e5e5ea;border-radius:12px;font-size:15px;outline:none;margin:4px 0;background:#f9f9f9}
 .field:focus{border-color:#4361ee}
-.preview{background:#f2f2f7;border-radius:12px;padding:10px;margin:4px 0;font-size:12px;line-height:1.5;max-height:300px;overflow-y:auto}
 .hidden{display:none!important}
 .toast{position:fixed;bottom:30px;left:50%;transform:translateX(-50%);background:#1c1c1e;color:#fff;padding:12px 24px;border-radius:12px;font-size:14px;z-index:999;opacity:0;transition:.25s;pointer-events:none}
 .toast.show{opacity:1}
@@ -58,7 +57,7 @@ h1{font-size:22px;padding:14px 0 6px;text-align:center;background:linear-gradien
 </div>
 
 <div class="card hidden" id="resultCard">
-  <div class="preview" id="preview"></div>
+  <div style="background:#f2f2f7;border-radius:12px;padding:10px;margin:4px 0;font-size:12px;line-height:1.5;max-height:200px;overflow-y:auto" id="preview"></div>
   <label style="font-size:13px;color:#8e8e93;margin:6px 0 3px">Наименование товара</label>
   <input class="field" id="fieldProduct" placeholder="Например: Молоко..." autocomplete="off">
   <button class="btn btn-success" id="btnSend">Отправить</button>
@@ -66,13 +65,12 @@ h1{font-size:22px;padding:14px 0 6px;text-align:center;background:linear-gradien
 </div>
 
 <div class="toast" id="toast"></div>
-
 <iframe name="tgFrame" id="tgFrame" style="display:none"></iframe>
 
 <script>
 var token=localStorage.getItem('tk')||'8816604840:AAGhrlFMgrz71sNgKxhgPnJvdmu0gbjtYEw';
 var chat=localStorage.getItem('ch')||'8881681054';
-var qr=null,scanning=false,lastData=null,tt=null;
+var qr=null,scanning=false,lastData=null,lastRaw='',lastFull=null,tt=null;
 
 function $(i){return document.getElementById(i)}
 function tm(m,e){clearTimeout(tt);var t=$('toast');t.textContent=m;t.style.background=e?'#ff3b30':'#1c1c1e';t.classList.add('show');tt=setTimeout(function(){t.classList.remove('show')},2500)}
@@ -123,28 +121,24 @@ function fmtReceipt(r){
 }
 
 function sendTG(text){
-  var form=document.createElement('form');
-  form.action=TG+'/sendMessage';
-  form.method='POST';
-  form.target='tgFrame';
-  var ci=document.createElement('input');ci.name='chat_id';ci.value=chat;form.appendChild(ci);
-  var ti=document.createElement('input');ti.name='text';ti.value=text;form.appendChild(ti);
-  document.body.appendChild(form);form.submit();document.body.removeChild(form)
+  var f=document.createElement('form');
+  f.action=TG+'/sendMessage';f.method='POST';f.target='tgFrame';
+  var c=document.createElement('input');c.name='chat_id';c.value=chat;f.appendChild(c);
+  var t=document.createElement('input');t.name='text';t.value=text;f.appendChild(t);
+  document.body.appendChild(f);f.submit();document.body.removeChild(f)
 }
 
 function sendFile(text){
-  var form=document.createElement('form');
-  form.action=TG+'/sendDocument';
-  form.method='POST';
-  form.target='tgFrame';
-  form.enctype='multipart/form-data';
-  var ci=document.createElement('input');ci.name='chat_id';ci.value=chat;form.appendChild(ci);
-  var fi=document.createElement('input');fi.type='file';fi.name='document';fi.id='fileInput';
-  var blob=new Blob([text],{type:'text/plain;charset=utf-8'});
-  var dt=new DataTransfer();dt.items.add(new File([blob],'chek.txt',{type:'text/plain'}));
-  fi.files=dt.files;
-  form.appendChild(fi);
-  document.body.appendChild(form);form.submit();document.body.removeChild(form)
+  try{
+    var f=document.createElement('form');
+    f.action=TG+'/sendDocument';f.method='POST';f.target='tgFrame';f.enctype='multipart/form-data';
+    var c=document.createElement('input');c.name='chat_id';c.value=chat;f.appendChild(c);
+    var fi=document.createElement('input');fi.type='file';fi.name='document';
+    var b=new Blob([text],{type:'text/plain;charset=utf-8'});
+    var dt=new DataTransfer();dt.items.add(new File([b],'chek.txt',{type:'text/plain'}));
+    fi.files=dt.files;f.appendChild(fi);
+    document.body.appendChild(f);f.submit();document.body.removeChild(f)
+  }catch(e){}
 }
 
 async function getReceipt(d){
@@ -154,15 +148,17 @@ async function getReceipt(d){
     'https://corsproxy.io/?'+encodeURIComponent('https://proverkacheka.nalog.ru/v2/check/'+fn+'/'+fd+'/'+fp),
     'https://api.allorigins.win/raw?url='+encodeURIComponent('https://proverkacheka.nalog.ru/v2/check/'+fn+'/'+fd+'/'+fp),
     'https://corsproxy.io/?'+encodeURIComponent('https://proverkacheka.nalog.ru/check/'+fn+'/'+fd+'/'+fp),
-    'https://api.allorigins.win/raw?url='+encodeURIComponent('https://proverkacheka.nalog.ru/check/'+fn+'/'+fd+'/'+fp)
+    'https://api.allorigins.win/raw?url='+encodeURIComponent('https://proverkacheka.nalog.ru/check/'+fn+'/'+fd+'/'+fp),
+    'https://corsproxy.io/?'+encodeURIComponent('https://receipt.tax/api/v1/check?fn='+fn+'&fd='+fd+'&fp='+fp),
+    'https://corsproxy.io/?'+encodeURIComponent('https://ofdapi.ru/api/v1/check?fn='+fn+'&fd='+fd+'&fp='+fp)
   ];
   var results=await Promise.allSettled(urls.map(function(u){
     return new Promise(function(resolve,reject){
-      var ac=new AbortController();var to=setTimeout(function(){ac.abort()},6000);
+      var ac=new AbortController();var to=setTimeout(function(){ac.abort()},8000);
       fetch(u).then(function(r){clearTimeout(to);if(!r.ok)throw 0;return r.text()}).then(function(t){
         if(!t||t[0]!='{')throw 0;
         var j=JSON.parse(t);
-        if(j.contents)j=JSON.parse(j.contents);
+        if(j.contents)try{j=JSON.parse(j.contents)}catch(e){}
         resolve(j)
       }).catch(function(){clearTimeout(to);reject()})
     })
@@ -185,21 +181,18 @@ async function sc(){
 function sp(){if(qr){try{qr.stop();qr.clear()}catch(e){}qr=null}scanning=false;$('scannerWrap').classList.remove('active')}
 
 async function sr(raw){
-  lastData=pr(raw);
-  var h=fmtAllQR(lastData);
-  if(lastData.fn)h+='\nЧек: https://proverkacheka.nalog.ru/check/'+lastData.fn+'/'+lastData.i+'/'+lastData.fp+'\n';
-  h+='Загрузка полных данных...';
-  $('preview').innerHTML=h;
-  $('resultCard').classList.remove('hidden');
+  lastRaw=raw;lastData=pr(raw);lastFull=null;
+  var h='<b>QR:</b> ';
+  for(var k in lastData)h+=label(k)+'='+lastData[k]+'  ';
+  h+='<br><em>Загрузка...</em>';
+  $('preview').innerHTML=h;$('resultCard').classList.remove('hidden');
 
-  try{
-    var full=await getReceipt(lastData);
-    if(full){var ff=fmtReceipt(full);if(ff)h=h.replace('Загрузка полных данных...','')+'\n'+ff}
-    else{h=h.replace('Загрузка полных данных...','')}
-  }catch(e){h=h.replace('Загрузка полных данных...','')}
+  try{lastFull=await getReceipt(lastData)}catch(e){lastFull=null}
 
-  $('preview').innerHTML=h;
-  $('fieldProduct').value='';
+  if(lastFull){var ff=fmtReceipt(lastFull);if(ff)h=h.replace('<em>Загрузка...</em>','<br><b>ПОЛНЫЙ ЧЕК:</b><br>'+ff.replace(/\n/g,'<br>'))}
+  else{h=h.replace('<em>Загрузка...</em>','<br><em>Загружен</em>')}
+
+  $('preview').innerHTML=h;$('fieldProduct').value='';
   setTimeout(function(){$('fieldProduct').focus()},300)
 }
 
@@ -207,19 +200,17 @@ function doSend(product){
   if(!lastData)return;
   var msg=fmtAllQR(lastData);
   if(product)msg='Товар: '+product+'\n\n'+msg;
-  if(lastData.fn)msg+='\nПолный чек: https://proverkacheka.nalog.ru/check/'+lastData.fn+'/'+lastData.i+'/'+lastData.fp;
+  if(lastFull){var ff=fmtReceipt(lastFull);if(ff)msg+=ff}
+  if(lastData.fn)msg+='\nЧек: https://proverkacheka.nalog.ru/check/'+lastData.fn+'/'+lastData.i+'/'+lastData.fp;
 
   sendTG(msg);
-
-  // Пытаемся отправить .txt файл через 1 секунду
-  setTimeout(function(){
-    try{sendFile(msg)}catch(e){}
-  },1000);
+  setTimeout(function(){try{sendFile(msg)}catch(e){}},500);
 
   tm('Отправлено!');
-  $('resultCard').classList.add('hidden');lastData=null
+  $('resultCard').classList.add('hidden');lastData=null;lastFull=null
 }
 
+var TG='https://api.telegram.org/bot';
 $('btnSave').onclick=function(){token=$('cfgToken').value.trim();chat=$('cfgChat').value.trim();localStorage.setItem('tk',token);localStorage.setItem('ch',chat);tm('Сохранено')};
 $('cfgToken').value=token;$('cfgChat').value=chat;
 $('btnSend').onclick=function(){doSend($('fieldProduct').value.trim())};
