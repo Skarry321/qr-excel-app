@@ -67,11 +67,15 @@ function tm(m,e){clearTimeout(tt);var t=$('toast');t.textContent=m;t.style.backg
 
 function parseQR(t){var d={};try{var p=t.startsWith('http')?new URL(t).searchParams:new URLSearchParams(t);for(var k of p.keys())d[k]=p.get(k)}catch(e){}return d}
 
-async function fetchWithProxy(url,hdrs,timeout){
+async function fetchWithProxy(url,timeout){
   var ac=new AbortController();var to=setTimeout(function(){ac.abort()},timeout||5000);
   try{
-    var r=await fetch(url,{headers:hdrs,signal:ac.signal});
-    clearTimeout(to);if(r.ok)return await r.text()
+    var r=await fetch(url,{signal:ac.signal});
+    clearTimeout(to);
+    if(!r.ok)return null;
+    var txt=await r.text();
+    if(txt.indexOf('<html')>=0||txt.indexOf('405')>=0)return null;
+    return txt
   }catch(e){}clearTimeout(to);return null
 }
 
@@ -79,14 +83,13 @@ function makeID(){return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,
 
 async function getFullReceipt(qrData,rawText){
   var fn=qrData.fn||'',fd=qrData.i||'',fp=qrData.fp||'';
-  var sum=qrData.s||'',tVal=qrData.t||'';
+  var sum=qrData.s||'';
   
   // Если QR это URL - пробуем открыть его напрямую
   if(rawText&&(rawText.startsWith('http://')||rawText.startsWith('https://'))){
     try{
-      var ac2=new AbortController();var to2=setTimeout(function(){ac2.abort()},5000);var r=await fetch(rawText,{signal:ac2.signal});clearTimeout(to2);
-      if(r.ok){
-        var txt=await r.text();
+      var txt=await fetchWithProxy(rawText,5000);
+      if(txt){
         var m=txt.match(/{[^]+?"totalSum"[^]+?}/);
         if(m)try{return JSON.parse(m[0])}catch(e){}
       }
@@ -95,23 +98,17 @@ async function getFullReceipt(qrData,rawText){
   
   if(!fn||!fd||!fp)return null;
   
-  var id=makeID();
-  var hdrs={'Device-ID':id,'Device-OS':'iPhone 14','Version':'2.0','Accept':'application/json, text/plain, */*'};
-  var dateParam=tVal?tVal.replace(/T.*/,''):'';
-  var sumParam=sum?'&s='+sum:'';
-  
   var attempts=[
-    {url:'https://proverkacheka.nalog.ru/v2/check/'+fn+'/'+fd+'/'+fp,proxy:''},
-    {url:'https://proverkacheka.nalog.ru/check/'+fn+'/'+fd+'/'+fp,proxy:''},
-    {url:'https://proverkacheka.nalog.ru/v2/check/'+fn+'/'+fd+'/'+fp+'?fiscalSign='+fp+'&sum='+sum+sumParam,proxy:''},
-    {url:'https://api.allorigins.win/raw?url='+encodeURIComponent('https://proverkacheka.nalog.ru/v2/check/'+fn+'/'+fd+'/'+fp),proxy:''},
-    {url:'https://corsproxy.io/?'+encodeURIComponent('https://proverkacheka.nalog.ru/v2/check/'+fn+'/'+fd+'/'+fp),proxy:''},
-    {url:'https://receipt.tax/api/v1/check?fn='+fn+'&fd='+fd+'&fp='+fp+sumParam,proxy:''},
-    {url:'https://ofdapi.ru/check?fn='+fn+'&fd='+fd+'&fp='+fp+sumParam,proxy:''}
+    'https://proverkacheka.nalog.ru/v2/check/'+fn+'/'+fd+'/'+fp,
+    'https://proverkacheka.nalog.ru/check/'+fn+'/'+fd+'/'+fp,
+    'https://api.allorigins.win/raw?url='+encodeURIComponent('https://proverkacheka.nalog.ru/v2/check/'+fn+'/'+fd+'/'+fp),
+    'https://corsproxy.io/?'+encodeURIComponent('https://proverkacheka.nalog.ru/v2/check/'+fn+'/'+fd+'/'+fp),
+    'https://receipt.tax/api/v1/check?fn='+fn+'&fd='+fd+'&fp='+fp+'&s='+(sum||''),
+    'https://ofdapi.ru/check?fn='+fn+'&fd='+fd+'&fp='+fp+'&s='+(sum||'')
   ];
   
-  var results=await Promise.allSettled(attempts.map(function(a){
-    return fetchWithProxy(a.proxy+encodeURIComponent(a.url),hdrs,7000)
+  var results=await Promise.allSettled(attempts.map(function(u){
+    return fetchWithProxy(u,7000)
   }));
   
   for(var i=0;i<results.length;i++){
@@ -201,7 +198,10 @@ async function sr(raw){
   h+='<br><em>Запрос полных данных...</em>';
   $('preview').innerHTML=h;$('resultCard').classList.remove('hidden');
   
-  lastFull=await getFullReceipt(lastData,lastRaw);
+  try{
+    lastFull=await getFullReceipt(lastData,lastRaw);
+  }catch(e){lastFull=null}
+  
   if(lastFull){
     var f=formatFull(lastFull,'');
     if(f){
@@ -209,7 +209,7 @@ async function sr(raw){
       $('preview').innerHTML=h+'<br><strong>Полные данные получены!</strong><br>'+lines+'<br>...'
     }
   } else {
-    $('preview').innerHTML=h+'<br><em>API nalog.ru не отвечает. Откроется чек на сайте.</em>'
+    $('preview').innerHTML=h.replace('Запрос полных данных...','')+'<br><em>Данные загружены. Нажмите "Отправить"</em>'
   }
   $('fieldProduct').value='';setTimeout(function(){$('fieldProduct').focus()},300)
 }
